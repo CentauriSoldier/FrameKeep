@@ -42,6 +42,12 @@
                     <label class="form-label mt-3" for="thumbnail-time">Thumbnail time (seconds)</label>
                     <input class="form-control" id="thumbnail-time" type="number" min="0" max="86400" step="1" required data-help="Choose one time position for all previews. New previews use this position as videos are viewed. For shorter clips, the first frame is used if that position produces no image.">
                     <button class="btn btn-outline-secondary mt-3" id="clear-thumbnails" data-help="Delete generated preview images only. They regenerate as videos are viewed. Videos, tags, playlists, and display names are preserved." type="button">Clear thumbnail cache</button>
+                    <div class="border-top mt-3 pt-3">
+                        <p class="small text-body-secondary">Normally, previews are created as you view library cards. Generate all thumbnails now processes all available videos one at a time and reuses cached previews. This can use substantial NAS CPU and disk activity. Keep this page open until it finishes.</p>
+                        <button class="btn btn-outline-info" id="generate-thumbnails" type="button" data-help="Create previews for all available library videos, including those on other pages. Uses CPU and disk activity; keep the page open. Cached images are reused.">Generate all thumbnails now</button>
+                        <button class="btn btn-outline-secondary" id="stop-thumbnails" type="button" hidden>Stop after current thumbnail</button>
+                        <p class="small text-body-secondary mt-2 mb-0" id="bulk-thumbnail-status" role="status"></p>
+                    </div>
                 </section>
                 <section class="border rounded p-3" aria-labelledby="settings-backups-heading">
                     <h3 class="h6 mb-3" id="settings-backups-heading">Database backups</h3>

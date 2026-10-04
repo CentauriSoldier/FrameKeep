@@ -6,9 +6,21 @@ $db->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
 $db->exec('PRAGMA foreign_keys = ON');
 $db->exec('PRAGMA busy_timeout = 5000');
 
-$db->beginTransaction();
+$schemaVersion = 1;
+if ((int) $db->query('PRAGMA user_version')->fetchColumn() >= $schemaVersion) return;
+
+$db->exec('PRAGMA busy_timeout = 30000');
+$schemaTransaction = false;
 
 try {
+    $db->exec('BEGIN IMMEDIATE');
+    $schemaTransaction = true;
+    if ((int) $db->query('PRAGMA user_version')->fetchColumn() >= $schemaVersion) {
+        $db->exec('COMMIT');
+        $schemaTransaction = false;
+        $db->exec('PRAGMA busy_timeout = 5000');
+        return;
+    }
     $db->exec(<<<SQL
         CREATE TABLE IF NOT EXISTS videos (
             id      TEXT PRIMARY KEY NOT NULL,
@@ -129,11 +141,15 @@ try {
     if (!in_array('thumbnail_time', $settingsColumns, true)) $db->exec('ALTER TABLE app_settings ADD COLUMN thumbnail_time INTEGER NOT NULL DEFAULT 10');
     if (!in_array('thumbnail_offset', $columns, true)) $db->exec('ALTER TABLE videos ADD COLUMN thumbnail_offset INTEGER');
 
-    $db->commit();
+    $db->exec('PRAGMA user_version = ' . $schemaVersion);
+    $db->exec('COMMIT');
+    $schemaTransaction = false;
 } catch (Throwable $error) {
-    if ($db->inTransaction()) {
-        $db->rollBack();
+    if ($schemaTransaction) {
+        $db->exec('ROLLBACK');
     }
 
     throw $error;
+} finally {
+    $db->exec('PRAGMA busy_timeout = 5000');
 }

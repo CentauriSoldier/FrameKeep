@@ -13,6 +13,13 @@
     let tagObservers = [];
     let selected = new Set();
     let page = 1;
+    let restoredPage = null;
+    try {
+        const savedPage = Number(localStorage.getItem('framekeep-page'));
+        if (Number.isInteger(savedPage) && savedPage > 0) restoredPage = savedPage;
+    } catch (_) {}
+    let bulkThumbnailsRunning = false;
+    let stopBulkThumbnails = false;
     let gridColumns = 0;
     let pendingPagination = null;
     let paginationSequence = 0;
@@ -418,7 +425,14 @@
         $('fill-last-row').checked = fillLastRow;
         $('page-size-status').textContent = pageSize + ' per page';
         const pageCount = Math.max(1, Math.ceil(videos.length / pageSize));
+        if (state.settings && restoredPage !== null) {
+            page = restoredPage;
+            restoredPage = null;
+        }
         page = Math.max(1, Math.min(page, pageCount));
+        if (state.settings) {
+            try { localStorage.setItem('framekeep-page', String(page)); } catch (_) {}
+        }
         const playlist = state.playlists.find((item) => item.id === currentPlaylist);
         $('library-heading').textContent = playlist ? playlist.name : 'Video library';
         $('library-count').textContent = videos.length + ' matching · ' + state.videos.length + ' total · ' + selected.size + ' selected';
@@ -430,6 +444,8 @@
         $('page-slider').disabled = pageCount <= 1;
         $('previous-page').disabled = page <= 1;
         $('next-page').disabled = page >= pageCount;
+        $('first-page').disabled = page <= 1;
+        $('last-page').disabled = page >= pageCount;
         $('play-results').disabled = !videos.length;
         $('select-results').disabled = !videos.length;
         $('batch-playlist').disabled = !selected.size || !state.playlists.length;
@@ -1140,6 +1156,45 @@
         if (!confirm('Clear all cached thumbnails? They will regenerate when viewed. Your video files are untouched.')) return;
         if (await mutate('thumbnail_clear', {}, 'settings-dialog')) $('scan-status').textContent = 'Thumbnail cache cleared.';
     });
+    $('generate-thumbnails').addEventListener('click', async () => {
+        if (bulkThumbnailsRunning) return;
+        const videos = state.videos.filter((video) => !Number(video.missing) && !libraryOffline(video));
+        if (!videos.length) {
+            $('bulk-thumbnail-status').textContent = 'No available videos to process.';
+            return;
+        }
+        bulkThumbnailsRunning = true;
+        stopBulkThumbnails = false;
+        $('generate-thumbnails').disabled = true;
+        $('clear-thumbnails').disabled = true;
+        $('stop-thumbnails').hidden = false;
+        let processed = 0;
+        let failed = 0;
+        try {
+            for (const video of videos) {
+                if (stopBulkThumbnails) break;
+                $('bulk-thumbnail-status').textContent = 'Processing ' + (processed + 1) + ' / ' + videos.length + ' · ' + video.name;
+                try {
+                    const response = await fetch(root.dataset.thumbnail + '?id=' + encodeURIComponent(video.id) + '&v=' + state.settings.thumbnail_version, { cache: 'no-store' });
+                    const image = await response.blob();
+                    if (!response.ok || !response.headers.get('Content-Type')?.startsWith('image/jpeg') || !image.size) failed++;
+                } catch (_) { failed++; }
+                processed++;
+                refreshActivity(true);
+            }
+            $('bulk-thumbnail-status').textContent = (stopBulkThumbnails ? 'Stopped. ' : 'Complete. ') + processed + ' / ' + videos.length + ' processed · ' + failed + ' failed. Cached previews were reused; unsuccessful previews can be retried.';
+        } finally {
+            bulkThumbnailsRunning = false;
+            $('generate-thumbnails').disabled = false;
+            $('clear-thumbnails').disabled = false;
+            $('stop-thumbnails').hidden = true;
+            refreshActivity(true);
+        }
+    });
+    $('stop-thumbnails').addEventListener('click', () => {
+        stopBulkThumbnails = true;
+        $('bulk-thumbnail-status').textContent = 'Stopping after the current thumbnail finishes…';
+    });
     $('rescan').addEventListener('click', scanLibrary);
     $('all-videos').addEventListener('click', () => {
         currentPlaylist = 0;
@@ -1174,6 +1229,8 @@
         if (event.key === 'Enter') { event.preventDefault(); changePage($('page-number').value); }
     });
     $('page-slider').addEventListener('input', () => changePage($('page-slider').value));
+    $('first-page').addEventListener('click', () => changePage(1));
+    $('last-page').addEventListener('click', () => changePage($('page-number').max));
     async function savePagination() {
         const sequence = ++paginationSequence;
         const choice = { page_size: Number($('videos-per-page').value), fill_last_row: $('fill-last-row').checked };
