@@ -1,0 +1,6 @@
+# Local configuration and generated library data
+/FrameKeep/data/
+
+# Temporary diagnostic pages
+/FrameKeep/php/test-startup.php
+/FrameKeep/php/test-videos.php
