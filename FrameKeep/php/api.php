@@ -28,9 +28,9 @@ try {
         exit;
     }
 
-    if (in_array($action, array('playback_save', 'playback_autoplay', 'playback_audio'), true)) {
+    if (in_array($action, array('playback_save', 'playback_queue', 'playback_autoplay', 'playback_audio'), true)) {
         $db->beginTransaction();
-        $sequenceColumn = array('playback_save' => 'save_sequence', 'playback_audio' => 'audio_sequence', 'playback_autoplay' => 'autoplay_sequence')[$action];
+        $sequenceColumn = array('playback_save' => 'save_sequence', 'playback_queue' => 'save_sequence', 'playback_audio' => 'audio_sequence', 'playback_autoplay' => 'autoplay_sequence')[$action];
         $query = $db->prepare('UPDATE playback SET ' . $sequenceColumn . ' = ? WHERE id = 1 AND session = ? AND ' . $sequenceColumn . ' < ?');
         $sequence = (int) ($input['sequence'] ?? 0);
         $query->execute(array($sequence, (string) ($input['session'] ?? ''), $sequence));
@@ -46,6 +46,11 @@ try {
             if (!is_finite($position) || $position < 0) throw new InvalidArgumentException('Invalid playback position.');
             $query = $db->prepare('UPDATE playback SET video_id = ?, position = ?, queue = ?, queue_index = ? WHERE id = 1');
             $query->execute(array($id, $position, json_encode(array_values($input['queue'] ?? array()), JSON_THROW_ON_ERROR), (int) ($input['queue_index'] ?? 0)));
+        } elseif ($action === 'playback_queue') {
+            $ids = array_values($input['queue'] ?? array());
+            foreach ($ids as $id) requireRecord($db, 'videos', (string) $id);
+            $query = $db->prepare('UPDATE playback SET queue = ?, queue_index = ? WHERE id = 1');
+            $query->execute(array(json_encode($ids, JSON_THROW_ON_ERROR), (int) ($input['queue_index'] ?? -1)));
         } elseif ($action === 'playback_autoplay') {
             $query = $db->prepare('UPDATE playback SET autoplay = ? WHERE id = 1');
             $query->execute(array(!empty($input['autoplay']) ? 1 : 0));
@@ -106,6 +111,35 @@ try {
             if (is_resource($process)) $opened = proc_close($process) === 0;
         }
         echo json_encode(array('path' => $path, 'opened' => $opened), JSON_THROW_ON_ERROR | JSON_INVALID_UTF8_SUBSTITUTE);
+        exit;
+    }
+
+    if ($action === 'video_repair') {
+        $id = (string) ($input['video'] ?? '');
+        $query = $db->prepare('SELECT videos.path FROM videos JOIN libraries ON libraries.id = videos.library_id WHERE videos.id = ? AND libraries.enabled = 1 AND libraries.status = ?');
+        $query->execute(array($id, 'online'));
+        $path = $query->fetchColumn();
+        $query->closeCursor();
+        if ($path === false || !is_file($path) || !is_readable($path)) throw new RuntimeException('Repair failed: the file is unavailable or unreadable. The error was recorded in the log.');
+        clearstatcache(true, $path);
+        $size = filesize($path);
+        $mtime = filemtime($path);
+        if ($size === false || $mtime === false) throw new RuntimeException('Repair failed: file information could not be read. The error was recorded in the log.');
+        if (!is_file(F_FFPROBE) || !function_exists('proc_open')) throw new RuntimeException('Repair failed: configure FFprobe and allow PHP process execution. The error was recorded in the log.');
+        $metadata = inspectMedia($path) ?? array('duration' => null, 'video_width' => null, 'video_height' => null);
+        clearstatcache(true, $path);
+        if (filesize($path) !== $size || filemtime($path) !== $mtime) throw new RuntimeException('Repair stopped: the file changed during inspection. Try again. The error was recorded in the log.');
+        $query = $db->prepare('UPDATE videos SET file_size = ?, duration = ?, video_width = ?, video_height = ?, media_checked = 1, media_mtime = ?, thumbnail_key = NULL, thumbnail_offset = NULL WHERE id = ? AND path = ?');
+        $query->execute(array($size, $metadata['duration'], $metadata['video_width'], $metadata['video_height'], $mtime, $id, $path));
+        if (!$query->rowCount()) throw new RuntimeException('Repair stopped: the library record changed. Try again. The error was recorded in the log.');
+        $problems = array();
+        if ($size === 0) $problems[] = 'The file is empty.';
+        if ($metadata['duration'] === null) $problems[] = 'Duration remains unavailable.';
+        if (!$metadata['video_width'] || !$metadata['video_height']) $problems[] = 'Resolution remains unavailable.';
+        $success = !$problems;
+        $message = $success ? 'File metadata refreshed successfully.' : 'Metadata refreshed, but the file still needs attention: ' . implode(' ', $problems) . ' See the log for inspection details.';
+        logEvent('File repair', $message, array('path' => $path, 'success' => $success));
+        echo json_encode(array('state' => libraryState($db), 'repair' => array('success' => $success, 'message' => $message)), JSON_THROW_ON_ERROR | JSON_INVALID_UTF8_SUBSTITUTE);
         exit;
     }
 
@@ -305,6 +339,22 @@ try {
                 $query = $db->prepare('UPDATE videos SET path = ?, filename = ?, missing = 0, file_size = ?, library_id = ? WHERE id = ?');
                 $query->execute(array($path, basename(str_replace('\\', '/', $path)), $size === false ? null : $size, $candidate['library_id'], $videoId));
                 break;
+            case 'video_tags_save':
+            case 'video_playlists_add':
+                $videoId = (string) ($input['video'] ?? '');
+                requireRecord($db, 'videos', $videoId);
+                $choices = array_unique(array_map('intval', $input['choices'] ?? array()));
+                foreach ($choices as $choice) requireRecord($db, $action === 'video_tags_save' ? 'tags' : 'playlists', $choice);
+                if ($action === 'video_tags_save') {
+                    $query = $db->prepare('DELETE FROM video_tags WHERE video_id = ?');
+                    $query->execute(array($videoId));
+                    $query = $db->prepare('INSERT INTO video_tags (video_id, tag_id) VALUES (?, ?)');
+                    foreach ($choices as $choice) $query->execute(array($videoId, $choice));
+                } else {
+                    foreach ($choices as $choice) addPlaylistVideo($db, $choice, $videoId);
+                }
+                break;
+
             case 'video_tag':
                 $videoId = (string) ($input['video'] ?? '');
                 $tagId = (int) ($input['tag'] ?? 0);
@@ -349,6 +399,16 @@ try {
                 break;
 
             case 'tag_save':
+                if (($input['id'] ?? null) === 'untagged') {
+                    $textColor = $input['text_color'] ?? '#ffffff';
+                    $backgroundColor = $input['background_color'] ?? '#6c757d';
+                    $font = $input['font'] ?? 'system-ui';
+                    $fontSize = (int) ($input['font_size'] ?? 12);
+                    if (!preg_match('/^#[a-fA-F0-9]{6}$/', $textColor) || !preg_match('/^#[a-fA-F0-9]{6}$/', $backgroundColor) || !in_array($font, array('system-ui', 'Arial', 'Verdana', 'Georgia', 'serif', 'monospace'), true) || $fontSize < 10 || $fontSize > 24) throw new InvalidArgumentException('Choose valid tag colors, a listed font, and a size from 10 to 24.');
+                    $query = $db->prepare('UPDATE app_settings SET untagged_style = ? WHERE id = 1');
+                    $query->execute(array(json_encode(array('text_color' => $textColor, 'background_color' => $backgroundColor, 'font' => $font, 'font_size' => $fontSize), JSON_THROW_ON_ERROR)));
+                    break;
+                }
                 $name = requiredName($input['name'] ?? '');
                 $id = (int) ($input['id'] ?? 0);
                 $query = $db->prepare('SELECT id FROM tags WHERE name = ? COLLATE NOCASE AND id != ?');
@@ -381,14 +441,25 @@ try {
             case 'playlist_save':
                 $name = requiredName($input['name'] ?? '');
                 $id = (int) ($input['id'] ?? 0);
+                $textColor = $input['text_color'] ?? '#ffffff';
+                $backgroundColor = $input['background_color'] ?? '#6c757d';
+                $font = $input['font'] ?? 'system-ui';
+                $fontSize = (int) ($input['font_size'] ?? 12);
+                if (!preg_match('/^#[a-fA-F0-9]{6}$/', $textColor) || !preg_match('/^#[a-fA-F0-9]{6}$/', $backgroundColor) || !in_array($font, array('system-ui', 'Arial', 'Verdana', 'Georgia', 'serif', 'monospace'), true) || $fontSize < 10 || $fontSize > 24) throw new InvalidArgumentException('Choose valid playlist colors, a listed font, and a size from 10 to 24.');
+                $cover = (string) ($input['cover_video'] ?? '');
+                if ($cover !== '') {
+                    $query = $db->prepare('SELECT 1 FROM playlist_videos WHERE playlist_id = ? AND video_id = ?');
+                    $query->execute(array($id, $cover));
+                    if (!$query->fetchColumn()) throw new InvalidArgumentException('Choose a cover video from this playlist.');
+                }
 
                 if ($id) {
                     requireRecord($db, 'playlists', $id);
-                    $query = $db->prepare('UPDATE playlists SET name = ? WHERE id = ?');
-                    $query->execute(array($name, $id));
+                    $query = $db->prepare('UPDATE playlists SET name = ?, text_color = ?, background_color = ?, font = ?, font_size = ?, cover_video = ? WHERE id = ?');
+                    $query->execute(array($name, $textColor, $backgroundColor, $font, $fontSize, $cover ?: null, $id));
                 } else {
-                    $query = $db->prepare('INSERT INTO playlists (name) VALUES (?)');
-                    $query->execute(array($name));
+                    $query = $db->prepare('INSERT INTO playlists (name, text_color, background_color, font, font_size) VALUES (?, ?, ?, ?, ?)');
+                    $query->execute(array($name, $textColor, $backgroundColor, $font, $fontSize));
                 }
 
                 break;
@@ -452,6 +523,7 @@ try {
 
     echo json_encode(array('state' => libraryState($db), 'scan' => $scan, 'deletion' => $deletion, 'details' => $details), JSON_THROW_ON_ERROR | JSON_INVALID_UTF8_SUBSTITUTE);
 } catch (Throwable $error) {
+    logEvent('API', $error->getMessage(), array('action' => $action ?? 'startup'));
     if (isset($db) && $db->inTransaction()) {
         $db->rollBack();
     }

@@ -6,7 +6,7 @@ $db->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
 $db->exec('PRAGMA foreign_keys = ON');
 $db->exec('PRAGMA busy_timeout = 5000');
 
-$schemaVersion = 1;
+$schemaVersion = 3;
 if ((int) $db->query('PRAGMA user_version')->fetchColumn() >= $schemaVersion) return;
 
 $db->exec('PRAGMA busy_timeout = 30000');
@@ -141,6 +141,15 @@ try {
     if (!in_array('thumbnail_time', $settingsColumns, true)) $db->exec('ALTER TABLE app_settings ADD COLUMN thumbnail_time INTEGER NOT NULL DEFAULT 10');
     if (!in_array('thumbnail_offset', $columns, true)) $db->exec('ALTER TABLE videos ADD COLUMN thumbnail_offset INTEGER');
 
+    if (!in_array('untagged_style', $settingsColumns, true)) $db->exec("ALTER TABLE app_settings ADD COLUMN untagged_style TEXT NOT NULL DEFAULT '{}'");
+    $playlistColumns = array_column($db->query('PRAGMA table_info(playlists)')->fetchAll(), 'name');
+    if (!in_array('text_color', $playlistColumns, true)) {
+        $db->exec("ALTER TABLE playlists ADD COLUMN text_color TEXT NOT NULL DEFAULT '#ffffff'");
+        $db->exec("ALTER TABLE playlists ADD COLUMN background_color TEXT NOT NULL DEFAULT '#6c757d'");
+        $db->exec("ALTER TABLE playlists ADD COLUMN font TEXT NOT NULL DEFAULT 'system-ui'");
+        $db->exec('ALTER TABLE playlists ADD COLUMN font_size INTEGER NOT NULL DEFAULT 12');
+        $db->exec('ALTER TABLE playlists ADD COLUMN cover_video TEXT');
+    }
     $db->exec('PRAGMA user_version = ' . $schemaVersion);
     $db->exec('COMMIT');
     $schemaTransaction = false;

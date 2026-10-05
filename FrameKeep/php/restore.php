@@ -65,6 +65,7 @@ try {
     $db->commit();
     echo json_encode(array('restored' => true, 'recovery' => webPath($recovery)), JSON_THROW_ON_ERROR);
 } catch (Throwable $error) {
+    logEvent('Database restore', $error->getMessage());
     if (isset($db) && $db->inTransaction()) $db->rollBack();
     http_response_code($error instanceof InvalidArgumentException ? 400 : 500);
     echo json_encode(array('error' => $error->getMessage()), JSON_INVALID_UTF8_SUBSTITUTE);

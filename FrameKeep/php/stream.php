@@ -7,6 +7,7 @@ $query->execute(array((string) ($_GET['id'] ?? '')));
 $path = $query->fetchColumn();
 
 if ($path === false || !is_file($path) || !is_readable($path)) {
+    logEvent('Playback', 'Video file is unavailable or unreadable.', array('path' => $path));
     http_response_code(404);
     exit('Video file is unavailable.');
 }
@@ -14,6 +15,7 @@ if ($path === false || !is_file($path) || !is_readable($path)) {
 $file = fopen($path, 'rb');
 
 if ($file === false) {
+    logEvent('Playback', 'Video file could not be opened.', array('path' => $path));
     http_response_code(404);
     exit('Video file could not be opened.');
 }

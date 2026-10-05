@@ -1,25 +1,47 @@
+    <section class="card mb-4" aria-labelledby="tags-heading">
+        <div class="card-header d-flex align-items-center justify-content-between">
+            <h2 class="h6 mb-0" id="tags-heading"><button class="btn btn-sm btn-link text-body text-decoration-none p-0" type="button" data-bs-toggle="collapse" data-bs-target="#tags-content" aria-expanded="true" aria-controls="tags-content">Tags <i class="bi bi-chevron-down" aria-hidden="true"></i></button></h2>
+            <div class="d-flex flex-wrap gap-2"><button class="btn btn-sm btn-outline-secondary" id="reset-tag-filters" type="button" title="Return all tag filters to Ignore without changing video tags.">Reset tag filters</button><button class="btn btn-sm btn-outline-secondary" id="open-tag-help" type="button" aria-label="Tag filter help" title="Tag filter help" data-bs-toggle="modal" data-bs-target="#tag-help-dialog"><i class="bi bi-question-circle" aria-hidden="true"></i></button><button class="btn btn-sm btn-outline-secondary" id="manage-tags" type="button" aria-label="Manage tags" title="Manage tags"><i class="bi bi-tags" aria-hidden="true"></i></button></div>
+        </div>
+        <div class="collapse show" id="tags-content"><div class="card-body">
+            <div id="tag-filters" class="d-grid gap-2"></div>
+            <div class="d-none"><input class="form-check-input" type="radio" name="solo-tag" id="untagged-only" aria-label="Show only untagged videos"></div>
+        </div>
+    </div></section>
 <section class="card" aria-labelledby="library-heading">
     <div class="card-header d-flex flex-wrap align-items-center justify-content-between gap-3">
         <h2 class="h6 mb-0" id="library-heading">Video library</h2>
         <button class="btn btn-sm btn-outline-secondary" id="rescan" type="button"><i class="bi bi-arrow-clockwise me-2" aria-hidden="true"></i>Rescan</button>
     </div>
+    <div class="library-status px-3 py-2 border-bottom text-break" aria-label="Library status">
+        <div class="small text-body-secondary" id="scan-status" role="status">Loading library…</div>
+        <div class="small text-info d-none mt-1" id="scan-activity" role="status"></div>
+        <div class="small text-info d-none mt-1" id="thumbnail-activity" role="status"></div>
+        <div class="small text-body-secondary mt-1" id="thumbnail-count" role="status"></div>
+        <div id="app-message" class="small text-danger d-none mt-1" role="alert"></div>
+    </div>
     <div class="card-body">
         <div class="row g-2 mb-3">
-            <div class="col-12 col-md"><label class="visually-hidden" for="video-search">Search videos</label><input class="form-control" type="search" id="video-search" placeholder="Search videos"></div>
+            <div class="col-12 col-md"><label class="visually-hidden" for="video-search">Search videos</label><div class="input-group"><button class="btn btn-outline-secondary" id="clear-video-search" type="button" aria-label="Clear video search" title="Clear search"><i class="bi bi-x-lg" aria-hidden="true"></i></button><input class="form-control" type="search" id="video-search" placeholder="Search videos"></div></div>
             <div class="col-12 col-md-auto"><label class="visually-hidden" for="video-sort">Sort videos</label><select class="form-select" id="video-sort"><option value="default">Playlist order / name</option><option value="asc">Name A–Z</option><option value="desc">Name Z–A</option><option value="rating">Rating high–low</option><option value="duration">Duration short–long</option><option value="resolution">Resolution high–low</option></select></div>
         </div>
         <div class="d-flex flex-wrap align-items-end gap-2 mb-3">
             <div><label class="form-label small" for="rating-filter">Rating</label><select id="rating-filter" class="form-select form-select-sm"><option value="all">All ratings</option><option value="0">Unrated</option><option value="1">1+ stars</option><option value="2">2+ stars</option><option value="3">3+ stars</option><option value="4">4+ stars</option><option value="5">5 stars</option></select></div>
             <div><label class="form-label small" for="duration-filter">Duration</label><select id="duration-filter" class="form-select form-select-sm"><option value="all">Any duration</option><option value="short">Under 10 minutes</option><option value="medium">10–60 minutes</option><option value="long">1 hour or longer</option><option value="unknown">Unknown duration</option></select></div>
             <div><label class="form-label small" for="resolution-filter">Resolution</label><select id="resolution-filter" class="form-select form-select-sm"><option value="all">Any resolution</option><option value="720">720p or higher</option><option value="1080">1080p or higher</option><option value="2160">2160p or higher</option><option value="unknown">Unknown resolution</option></select></div>
+        <div class="d-flex flex-wrap align-items-center gap-2 ms-auto">
+            <div class="d-flex flex-wrap gap-2" role="group" aria-label="Results">
+                <button class="btn btn-sm btn-outline-secondary" id="play-results" type="button">Play results</button>
+                <button class="btn btn-sm btn-outline-secondary" id="select-results" type="button">Select results</button>
+            </div>
+            <div class="d-flex flex-wrap align-items-center gap-2 border-start ps-3 ms-1" role="group" aria-label="Selection actions">
+                <span class="small text-body-secondary">Selection</span>
+                <button class="btn btn-sm btn-outline-secondary" id="batch-playlist" type="button" disabled>Add / move to playlist</button>
+                <button class="btn btn-sm btn-outline-secondary" id="batch-tags" type="button" disabled>Tag</button>
+                <button class="btn btn-sm btn-outline-secondary" id="clear-selection" type="button">Clear</button>
+                <button class="btn btn-sm btn-outline-danger" id="delete-selected" type="button" disabled>Delete</button>
+            </div>
         </div>
-        <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
-            <button class="btn btn-sm btn-outline-info" id="play-results" type="button">Play results</button>
-            <button class="btn btn-sm btn-outline-secondary" id="select-results" type="button">Select results</button>
-            <button class="btn btn-sm btn-outline-secondary" id="batch-playlist" type="button" disabled>Add / move to playlist</button>
-            <button class="btn btn-sm btn-outline-secondary" id="batch-tags" type="button" disabled>Tag selected</button>
-            <button class="btn btn-sm btn-link" id="clear-selection" type="button">Clear selection</button>
-            <button class="btn btn-sm btn-outline-danger" id="delete-selected" type="button" disabled>Delete selected</button>
         </div>
         <p id="library-count" class="small text-body-secondary" role="status"></p>
         <div id="video-grid"></div>

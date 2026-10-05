@@ -10,6 +10,7 @@
     let videoMap = new Map();
     let currentPlaylist = 0;
     let tagModes = new Map();
+    const untaggedUnlocked = new Set();
     let tagObservers = [];
     let selected = new Set();
     let page = 1;
@@ -24,7 +25,10 @@
     let pendingPagination = null;
     let paginationSequence = 0;
     let queue = [];
+    let unshuffledQueue = null;
     let queueIndex = -1;
+    let standaloneVideo = null;
+    function currentVideoId() { return standaloneVideo || queue[queueIndex]; }
     let editingVideo = null;
     let bulkTagVideos = [];
     let managerKind = 'tag';
@@ -52,12 +56,13 @@
     try { settings = JSON.parse(localStorage.getItem('framekeep-settings') || '{}'); } catch (_) {}
     let sequence = Array.isArray(settings.sequence) ? settings.sequence.map(Number) : [];
     let shuffle = Boolean(settings.shuffle);
+    unshuffledQueue = Array.isArray(settings.unshuffledQueue) ? settings.unshuffledQueue : null;
     $('repeat-mode').value = ['off', 'video', 'queue'].includes(settings.repeat) ? settings.repeat : 'off';
 
     function saveSettings() {
         try {
             localStorage.setItem('framekeep-settings', JSON.stringify({
-                sequence, shuffle, repeat: $('repeat-mode').value
+                sequence, shuffle, unshuffledQueue, repeat: $('repeat-mode').value
             }));
         } catch (_) {}
     }
@@ -107,10 +112,6 @@
             star.setAttribute('aria-pressed', String(rating === current));
             group.append(star);
         }
-        const clear = button('Clear', () => mutate('video_rating', { video: video.id, rating: 0 }), 'btn btn-sm btn-link text-body-secondary p-1');
-        clear.disabled = !Number(video.rating);
-        group.append(clear);
-        if (showLabel) group.append(make('span', 'small text-body-secondary align-self-center', Number(video.rating) ? video.rating + ' / 5' : 'Unrated'));
         return group;
     }
     let mediaInspecting = false;
@@ -136,6 +137,7 @@
             }
             renderLibrary();
             renderPlayer();
+            renderAttention();
         } catch (error) {
             mediaRetryAt = Date.now() + 30000;
             ids.forEach(id => mediaAttempts.delete(id));
@@ -153,6 +155,7 @@
     }
 
     function showError(error, dialog = null) {
+        reportError(error.message || String(error));
         const target = dialog ? $(dialog).querySelector('.dialog-error') : $('app-message');
         target.textContent = error.message || String(error);
         target.classList.remove('d-none');
@@ -164,12 +167,72 @@
         if (!dialog) target.classList.add('d-none');
     }
 
+    const logUrl = new URL('log_api.php', new URL(root.dataset.thumbnail, document.baseURI)).href;
+    function reportError(message, detail = '') {
+        fetch(logUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'append', message, detail }), keepalive: true }).catch(() => {});
+    }
+    window.addEventListener('error', (event) => { if (event.message) reportError(event.message, (event.filename || '') + ':' + event.lineno); });
+    window.addEventListener('unhandledrejection', (event) => reportError(String(event.reason && event.reason.message || event.reason)));
+
+    let displayedLog = [];
+    function logText(entry) {
+        return entry.time + ' [' + entry.source + '] ' + entry.message + '\n' + JSON.stringify(entry.context || {}, null, 2);
+    }
+    async function copyLog(text) {
+        try {
+            await navigator.clipboard.writeText(text);
+            $('log-copy-status').textContent = 'Copied to clipboard.';
+        } catch (_) {
+            const field = $('log-copy-text');
+            field.value = text;
+            field.hidden = false;
+            field.focus();
+            field.select();
+            $('log-copy-status').textContent = 'Automatic copying is unavailable. Copy the selected text below using your keyboard or context menu.';
+        }
+    }
+    async function renderLog() {
+        clearError('log-dialog');
+        $('log-events').replaceChildren(make('p', 'text-body-secondary', 'Loading log…'));
+        try {
+            const response = await fetch(logUrl, { cache: 'no-store' });
+            const result = await response.json();
+            if (!response.ok) throw new Error(result.error || 'Could not read log.');
+            displayedLog = result.entries;
+            $('log-events').replaceChildren();
+            for (const entry of result.entries) {
+                const card = make('div', 'log-event border rounded p-3');
+                const date = new Date(entry.time);
+                const time = make('div', 'log-time small fw-semibold', Number.isNaN(date.getTime()) ? entry.time : date.toLocaleString());
+                const detail = make('div', 'log-detail');
+                detail.append(make('div', 'small text-info mb-1', entry.source), make('div', '', entry.message));
+                detail.append(button('Copy', () => copyLog(logText(entry))));
+                if (entry.context && Object.keys(entry.context).length) detail.append(make('pre', 'small mb-0 mt-2 text-body-secondary', JSON.stringify(entry.context, null, 2)));
+                card.append(time, detail);
+                $('log-events').append(card);
+            }
+            if (!result.entries.length) $('log-events').append(make('p', 'text-body-secondary', 'No logged errors.'));
+        } catch (error) { showError(error, 'log-dialog'); }
+    }
+    $('open-log').addEventListener('click', () => { modal('log-dialog').show(); renderLog(); });
+    $('refresh-log').addEventListener('click', renderLog);
+    $('copy-all-log').addEventListener('click', () => copyLog(displayedLog.map(logText).join('\n\n')));
+    $('clear-log').addEventListener('click', async () => {
+        if (!confirm('Empty the error log? This cannot be undone.')) return;
+        try {
+            const response = await fetch(logUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'clear' }) });
+            const result = await response.json();
+            if (!response.ok) throw new Error(result.error || 'Could not clear log.');
+            await renderLog();
+        } catch (error) { showError(error, 'log-dialog'); }
+    });
+
     function modal(id) {
         return bootstrap.Modal.getOrCreateInstance($(id));
     }
 
     function applyState(next) {
-        const playingId = queue[queueIndex];
+        const playingId = currentVideoId();
         state = next;
         root.dataset.thumbnailSize = state.settings.thumbnail_size;
         $('autoplay-open').checked = Boolean(Number(state.playback.autoplay));
@@ -329,19 +392,59 @@
     }
 
     function renderSidebar() {
+        $('all-videos').classList.add('playlist-card');
+        $('all-videos').replaceChildren(make('i', 'bi bi-collection-play playlist-cover-icon'), make('span', 'playlist-title', 'All videos'));
         $('all-videos').classList.toggle('active', !currentPlaylist);
         $('playlist-list').replaceChildren();
         for (const playlist of state.playlists) {
-            const entry = button(playlist.name + ' (' + playlist.items.length + ')', () => {
+            const entry = make('div', 'btn btn-outline-secondary text-start');
+            const selectPlaylist = () => {
                 currentPlaylist = playlist.id;
                 page = 1;
                 selected.clear();
                 render();
-            }, 'btn btn-outline-secondary text-start');
+            };
+            entry.tabIndex = 0;
+            entry.setAttribute('role', 'button');
+            entry.setAttribute('aria-label', playlist.name);
+            entry.addEventListener('click', selectPlaylist);
+            entry.addEventListener('keydown', (event) => {
+                if (event.target !== entry || !['Enter', ' '].includes(event.key)) return;
+                event.preventDefault();
+                selectPlaylist();
+            });
             entry.classList.toggle('active', playlist.id === currentPlaylist);
+            entry.classList.add('playlist-card');
+            styleTag(entry, playlist);
+            entry.replaceChildren();
+            const candidates = playlist.items.map((item) => videoMap.get(item.video_id)).filter((video) => video && !Number(video.missing) && !libraryOffline(video));
+            const cover = candidates.find((video) => video.id === playlist.cover_video && video.thumbnail_ready) || candidates.find((video) => video.thumbnail_ready);
+            if (cover && !Number(cover.missing) && !libraryOffline(cover)) {
+                const image = make('img', 'playlist-cover');
+                image.alt = '';
+                image.loading = 'lazy';
+                image.src = root.dataset.thumbnail + '?id=' + encodeURIComponent(cover.id) + '&v=' + state.settings.thumbnail_version;
+                entry.append(image);
+            } else entry.append(make('i', 'bi bi-music-note-list playlist-cover-icon'));
+            entry.append(make('span', 'playlist-title', playlist.name + ' (' + playlist.items.length + ')'));
+            const play = button('Play', (event) => {
+                event.stopPropagation();
+                startQueue(playlist.items.map((item) => item.video_id));
+            }, 'btn btn-sm btn-outline-info');
+            play.disabled = !candidates.length;
+            const enqueue = button('Queue', (event) => {
+                event.stopPropagation();
+                appendQueue(playlist.items.map((item) => item.video_id));
+            }, 'btn btn-sm btn-outline-success');
+            enqueue.disabled = !candidates.length;
+            const actions = make('div', 'playlist-actions d-flex justify-content-center gap-1');
+            actions.append(play, enqueue);
+            entry.append(actions);
             $('playlist-list').append(entry);
         }
         if (!state.playlists.length) $('playlist-list').append(make('p', 'small text-body-secondary mb-0', 'No playlists yet.'));
+        const untaggedRadio = $('untagged-only');
+        const untaggedSelected = untaggedRadio.checked;
         $('tag-filters').replaceChildren();
         tagObservers.forEach((observer) => observer.disconnect());
         tagObservers = [];
@@ -352,8 +455,10 @@
             slider.setAttribute('aria-label', tag.name + ' filter');
             slider.setAttribute('aria-valuemin', '-1');
             slider.setAttribute('aria-valuemax', '1');
-            const handle = styleTag(make('span', 'tag-filter-handle', tag.name), tag);
-            slider.append(handle);
+            const label = styleTag(make('span', 'tag-filter-name', tag.name), tag);
+            const handle = make('span', 'tag-filter-handle');
+            handle.setAttribute('aria-hidden', 'true');
+            slider.append(label, handle);
             let value = tagModes.get(tag.id) === 'exclude' ? -1 : tagModes.get(tag.id) === 'include' ? 1 : 0;
             function updateSlider(next, apply = true) {
                 value = Math.max(-1, Math.min(1, next));
@@ -362,9 +467,9 @@
                 slider.setAttribute('aria-valuenow', String(value));
                 slider.setAttribute('aria-valuetext', mode);
                 slider.title = tag.name + ': ' + mode + '. Left excludes, center ignores, right includes.';
-                handle.textContent = (value === -1 ? '− ' : value === 1 ? '+ ' : '• ') + tag.name;
                 if (!apply) return;
                 if (mode === 'ignore') tagModes.delete(tag.id); else tagModes.set(tag.id, mode);
+                for (const radio of $('tag-filters').querySelectorAll('input[type="radio"]')) radio.checked = false;
                 if (mode === 'include') $('untagged-only').checked = false;
                 page = 1;
                 renderLibrary();
@@ -396,22 +501,44 @@
                 updateSlider(next);
             });
             updateSlider(value, false);
-            $('tag-filters').append(slider);
-            const fitHandle = () => {
-                const measure = document.createElement('canvas').getContext('2d');
-                measure.font = getComputedStyle(handle).font;
-                const desired = Math.max(slider.clientWidth / 3, measure.measureText(handle.textContent).width + 12);
-                slider.style.setProperty('--tag-handle-width', Math.min(slider.clientWidth, desired) + 'px');
-                const text = document.createRange();
-                text.selectNodeContents(handle);
-                slider.style.height = Math.max(36, text.getBoundingClientRect().height + 8) + 'px';
-            };
-            const observer = new ResizeObserver(fitHandle);
-            observer.observe(slider);
-            tagObservers.push(observer);
-            fitHandle();
+            const row = make('div', 'tag-filter-row d-flex align-items-stretch gap-1');
+            slider.classList.add('flex-grow-1');
+            const solo = make('input', 'form-check-input tag-filter-solo m-0');
+            solo.type = 'radio';
+            solo.name = 'solo-tag';
+            solo.checked = tagModes.get(tag.id) === 'include' && state.tags.every((other) => other.id === tag.id || tagModes.get(other.id) === 'exclude');
+            solo.setAttribute('aria-label', 'Solo ' + tag.name);
+            solo.addEventListener('change', () => {
+                for (const other of state.tags) tagModes.set(other.id, other.id === tag.id ? 'include' : 'exclude');
+                $('untagged-only').checked = false;
+                page = 1;
+                render();
+            });
+            solo.title = 'Show videos with only ' + tag.name + ', excluding every other tag.';
+            row.append(solo, slider);
+            $('tag-filters').append(row);
         }
-        if (!state.tags.length) $('tag-filters').append(make('p', 'small text-body-secondary mb-0', 'No tags yet.'));
+        const untaggedRow = make('label', 'd-flex align-items-center gap-1');
+        untaggedRadio.checked = untaggedSelected;
+        untaggedRadio.className = 'form-check-input tag-filter-solo m-0';
+        const untaggedLabel = styleTag(make('span', 'tag-filter-name border rounded flex-grow-1', 'Untagged'), untaggedStyle());
+        untaggedRow.append(untaggedRadio, untaggedLabel);
+        $('tag-filters').append(untaggedRow);
+        const measure = document.createElement('canvas').getContext('2d');
+        let longest = 0;
+        for (const label of $('tag-filters').querySelectorAll('.tag-filter-name')) {
+            measure.font = getComputedStyle(label).font;
+            longest = Math.max(longest, measure.measureText(label.textContent).width);
+        }
+        $('tag-filters').style.setProperty('--tag-control-width', Math.ceil((longest + 12) * 2 + 22) + 'px');
+        const playlistMeasure = document.createElement('canvas').getContext('2d');
+        let playlistWidth = 0;
+        const entries = [$('all-videos'), ...$('playlist-list').querySelectorAll('button')];
+        for (const entry of entries) {
+            playlistMeasure.font = getComputedStyle(entry).font;
+            playlistWidth = Math.max(playlistWidth, playlistMeasure.measureText(entry.textContent).width + 24);
+        }
+        for (const entry of entries) { entry.style.width = Math.ceil(playlistWidth) + 'px'; entry.style.maxWidth = '100%'; }
     }
 
     function renderLibrary() {
@@ -452,7 +579,7 @@
         $('delete-selected').disabled = !selected.size;
         $('batch-tags').disabled = !selected.size || !state.tags.length;
         $('video-grid').replaceChildren();
-        const currentId = queue[queueIndex];
+        const currentId = currentVideoId();
         for (const video of videos.slice((page - 1) * pageSize, page * pageSize)) {
             const column = make('div', 'library-column');
             const card = make('div', 'card h-100 video-card');
@@ -461,7 +588,7 @@
             preview.loading = 'lazy';
             if (!libraryOffline(video)) preview.src = root.dataset.thumbnail + '?id=' + encodeURIComponent(video.id) + '&v=' + state.settings.thumbnail_version;
             const playAndReveal = () => {
-                startQueue(visibleVideos().map((item) => item.id), video.id);
+                playVideo(video.id);
                 if (Number(state.settings.scroll_to_player)) $('video-player').closest('section').scrollIntoView({
                     block: 'start',
                     behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'
@@ -502,12 +629,16 @@
             if (!tags.length) badges.append(make('span', 'badge text-bg-secondary', 'Untagged'));
             for (const tag of tags) badges.append(styleTag(make('span', 'badge', tag.name), tag));
             const actions = make('div', 'd-flex flex-wrap gap-1 mt-auto');
-            const play = button('Play', () => startQueue(visibleVideos().map((item) => item.id), video.id), 'btn btn-sm btn-outline-info');
+            const play = button('Play', () => playVideo(video.id), 'btn btn-sm btn-outline-info');
             play.disabled = libraryOffline(video) || Boolean(Number(video.missing));
             actions.append(play);
+            const enqueue = button('Queue', () => appendQueue([video.id]), 'btn btn-sm btn-outline-success');
+            enqueue.disabled = play.disabled;
+            actions.append(enqueue);
             actions.append(button('Edit', () => editVideo(video.id)));
+            actions.append(button('Tag', () => openAssignments(video.id, 'tags')));
             actions.append(button('Details', () => showDetails(video.id)));
-            actions.append(button('Browse', () => browseLocation({ video: video.id })));
+            actions.append(button('Path', () => browseLocation({ video: video.id })));
             actions.append(button('Delete', () => deleteVideos([video.id]), 'btn btn-sm btn-outline-danger'));
             if (playlist) {
                 actions.append(button('Remove', async () => {
@@ -547,25 +678,50 @@
         return result;
     }
 
+    function playVideo(id) {
+        standaloneVideo = id;
+        queueIndex = -1;
+        playCurrent();
+    }
+
+    function appendQueue(ids) {
+        const added = ids.filter((id) => videoMap.has(id) && !libraryOffline(videoMap.get(id)) && !Number(videoMap.get(id).missing));
+        queue.push(...added);
+        if (unshuffledQueue) unshuffledQueue.push(...added);
+        renderPlayer();
+        saveQueue();
+    }
+
     function startQueue(ids, startId = null) {
+        standaloneVideo = null;
         ids = ids.filter((id) => videoMap.has(id) && !libraryOffline(videoMap.get(id)) && !Number(videoMap.get(id).missing));
         if (!ids.length) return;
+        unshuffledQueue = shuffle ? [...ids] : null;
         queue = shuffle ? randomize(ids) : [...ids];
         if (shuffle && startId) {
             const index = queue.indexOf(startId);
             if (index >= 0) [queue[0], queue[index]] = [queue[index], queue[0]];
         }
         queueIndex = startId && !shuffle ? Math.max(0, queue.indexOf(startId)) : 0;
+        saveQueue();
         playCurrent();
     }
 
+    async function saveQueue() {
+        saveSettings();
+        try {
+            const response = await fetch(root.dataset.api, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(playbackRequest({ action: 'playback_queue', queue: [...queue], queue_index: queueIndex })), keepalive: true });
+            await checkPlaybackSave(response, 'Playback queue could not be saved.');
+        } catch (error) { showError(error); }
+    }
+
     async function playCurrent(autoplay = true, position = 0) {
-        if (libraryOffline(videoMap.get(queue[queueIndex]))) {
+        if (libraryOffline(videoMap.get(currentVideoId()))) {
             renderPlayer();
             $('queue-status').textContent = 'Library offline or disabled. Your saved playback is preserved.';
             return;
         }
-        const video = videoMap.get(queue[queueIndex]);
+        const video = videoMap.get(currentVideoId());
         if (!video) return;
         clearError();
         const url = new URL(root.dataset.stream, document.baseURI);
@@ -597,7 +753,7 @@
     }
 
     function progressData() {
-        const video = queue[queueIndex];
+        const video = currentVideoId();
         if (!playbackReady || !video || !videoMap.has(video) || resumePosition !== null || !player.getAttribute('src') || player.readyState < 1) return null;
         return playbackRequest({ action: 'playback_save', video, position: player.currentTime, queue, queue_index: queueIndex, volume: player.volume, muted: player.muted });
     }
@@ -680,6 +836,7 @@
             }
             const candidate = videoMap.get(queue[next]);
             if (!candidate || libraryOffline(candidate) || Number(candidate.missing)) continue;
+            standaloneVideo = null;
             queueIndex = next;
             playCurrent();
             return;
@@ -687,7 +844,7 @@
     }
 
     function renderPlayer() {
-        const video = videoMap.get(queue[queueIndex]);
+        const video = videoMap.get(currentVideoId());
         $('playing-tags').replaceChildren();
         if (!state.tags.length) $('playing-tags').append(make('span', 'small text-body-secondary', 'Create tags in the sidebar to assign them here.'));
         for (const tag of state.tags) {
@@ -696,7 +853,7 @@
             const control = make('input', 'form-check-input m-0');
             control.type = 'checkbox';
             control.checked = assigned;
-            control.disabled = !video;
+            control.disabled = !video || (!video.tags.length && !untaggedUnlocked.has(video.id));
             control.addEventListener('change', async () => {
                 const wanted = control.checked;
                 control.disabled = true;
@@ -709,33 +866,72 @@
             label.append(control, make('span', '', tag.name));
             $('playing-tags').append(label);
         }
+        const untagged = styleTag(make('label', 'playing-tag d-flex align-items-center gap-2 border rounded'), untaggedStyle());
+        const clearTags = make('input', 'form-check-input m-0');
+        clearTags.type = 'checkbox';
+        clearTags.disabled = !video;
+        clearTags.checked = Boolean(video && !video.tags.length && !untaggedUnlocked.has(video.id));
+        clearTags.addEventListener('change', async () => {
+            if (!video) return;
+            if (!clearTags.checked) { untaggedUnlocked.add(video.id); renderPlayer(); return; }
+            clearTags.disabled = true;
+            if (await mutate('video_tags_save', { video: video.id, choices: [] })) untaggedUnlocked.delete(video.id);
+            renderPlayer();
+        });
+        untagged.append(clearTags, make('span', '', 'Untagged'));
+        $('playing-tags').append(untagged);
         $('playing-rating').replaceChildren(...(video ? [ratingControl(video)] : []));
-        $('playing-media').textContent = video ? mediaLabel(video) : '';
+        $('playing-media').textContent = video ? mediaLabel(video) + ' · ' + fileSizeLabel(video.file_size) : '';
         $('playing-title').textContent = video ? video.name : 'Select a video from your library.';
-        $('queue-status').textContent = libraryOffline(video) ? video.library_name + ': library ' + video.library_status + '. Records and saved playback are preserved.' : video ? (queueIndex + 1) + ' of ' + queue.length + ' in playback queue' : 'Nothing queued.';
+        $('queue-status').textContent = libraryOffline(video) ? video.library_name + ': library ' + video.library_status + '. Records and saved playback are preserved.' : queue.length ? (standaloneVideo ? 'Not in queue · ' : (queueIndex + 1) + ' of ') + queue.length + (standaloneVideo ? ' queued' : '') : 'Empty';
         $('edit-playing').disabled = !video;
         $('browse-playing').disabled = !video;
+        $('playlist-playing').disabled = !video;
         $('play-pause').disabled = !video || libraryOffline(video) || Boolean(Number(video.missing));
-        $('previous-video').disabled = !video || (queueIndex === 0 && $('repeat-mode').value !== 'queue');
-        $('next-video').disabled = !video || (queueIndex === queue.length - 1 && $('repeat-mode').value !== 'queue');
+        $('previous-video').disabled = !video || !queue.length || Boolean(standaloneVideo) || (queueIndex === 0 && $('repeat-mode').value !== 'queue');
+        $('next-video').disabled = !video || !queue.length || (queueIndex === queue.length - 1 && $('repeat-mode').value !== 'queue');
         $('shuffle').classList.toggle('active', shuffle);
         $('shuffle').setAttribute('aria-pressed', String(shuffle));
         $('playback-queue').replaceChildren();
+        $('clear-queue').disabled = !queue.length;
         queue.forEach((id, index) => {
             const video = videoMap.get(id);
             if (!video) return;
             const entry = button((index + 1) + '. ' + video.name, () => {
+                standaloneVideo = null;
                 queueIndex = index;
                 playCurrent();
             }, 'list-group-item list-group-item-action');
             entry.classList.toggle('active', index === queueIndex);
+            entry.classList.add('d-flex', 'align-items-center', 'gap-2');
+            const label = make('span', '', (index + 1) + '. ' + video.name);
+            const preview = make('span', 'd-flex align-items-center justify-content-center flex-shrink-0');
+            preview.style.width = '3rem';
+            preview.style.height = '2rem';
+            if (video.thumbnail_ready) {
+                const image = make('img', 'rounded');
+                image.alt = '';
+                image.loading = 'lazy';
+                image.style.width = '100%';
+                image.style.height = '100%';
+                image.style.objectFit = 'contain';
+                image.src = root.dataset.thumbnail + '?id=' + encodeURIComponent(id) + '&v=' + state.settings.thumbnail_version;
+                image.addEventListener('error', () => preview.replaceChildren(make('i', 'bi bi-film')));
+                preview.append(image);
+            } else preview.append(make('i', 'bi bi-film'));
+            entry.replaceChildren(preview, label);
             $('playback-queue').append(entry);
         });
     }
 
+    function untaggedStyle() {
+        return { text_color: '#ffffff', background_color: '#6c757d', font: 'system-ui', font_size: 12, ...state.untagged };
+    }
+
     function checkboxes(container, records, chosen) {
         container.replaceChildren();
-        if (!records.length) {
+        const tagList = container.id === 'video-tags' || (container.id === 'assignment-choices' && assignmentKind === 'tags');
+        if (!records.length && !tagList) {
             container.append(make('span', 'small text-body-secondary', 'None created yet.'));
             return;
         }
@@ -748,6 +944,38 @@
             label.append(input, make('span', 'form-check-label', record.name));
             container.append(label);
         }
+        if (tagList) {
+            const label = styleTag(make('label', 'form-check border rounded p-2'), untaggedStyle());
+            const input = make('input', 'form-check-input');
+            input.type = 'checkbox'; input.value = 'untagged'; input.checked = !chosen.length;
+            label.append(input, make('span', 'form-check-label', 'Untagged'));
+            const update = () => {
+                for (const other of container.querySelectorAll('input')) {
+                    if (other === input) continue;
+                    other.disabled = input.checked;
+                    if (input.checked) other.checked = false;
+                }
+            };
+            input.addEventListener('change', update);
+            update();
+            container.append(label);
+        }
+    }
+
+    let assignmentVideo = null;
+    let assignmentKind = 'tags';
+
+    function openAssignments(id, kind) {
+        const video = videoMap.get(id);
+        if (!video) return;
+        assignmentVideo = id;
+        assignmentKind = kind;
+        clearError('assignment-dialog');
+        $('assignment-title').textContent = kind === 'tags' ? 'Tag video' : 'Add to playlist';
+        $('assignment-video-name').textContent = video.name;
+        $('assignment-note').textContent = kind === 'tags' ? 'Select the tags for this video. Unchecked tags will be removed when you save.' : 'Select playlists to add this video to. Existing memberships are kept.';
+        checkboxes($('assignment-choices'), kind === 'tags' ? state.tags : state.playlists, kind === 'tags' ? video.tags : state.playlists.filter((playlist) => playlist.items.some((item) => item.video_id === id)).map((playlist) => playlist.id));
+        modal('assignment-dialog').show();
     }
 
     function editVideo(id) {
@@ -763,7 +991,7 @@
     }
 
     function chosenValues(id) {
-        return [...$(id).querySelectorAll('input:checked')].map((input) => Number(input.value));
+        return [...$(id).querySelectorAll('input:checked')].filter((input) => input.value !== 'untagged').map((input) => Number(input.value));
     }
 
     async function showDetails(id) {
@@ -798,16 +1026,21 @@
     function renderManager() {
         $('manager-title').textContent = managerKind === 'tag' ? 'Manage tags' : 'Manage playlists';
         $('manager-list').replaceChildren();
-        const records = managerKind === 'tag' ? state.tags : state.playlists;
+        const records = managerKind === 'tag' ? [...state.tags, { id: 'untagged', name: 'Untagged', ...untaggedStyle() }] : state.playlists;
         for (const record of records) {
             const row = make('div', 'd-flex flex-wrap gap-2 border rounded p-2');
             const name = make('input', 'form-control');
             name.value = record.name;
+            name.disabled = record.id === 'untagged';
             name.setAttribute('aria-label', 'Rename ' + record.name);
-            row.append(name);
+            const namePreview = make('div', 'manager-name-preview w-100');
+            const previewSpace = make('div', 'd-flex justify-content-center align-items-center');
+            namePreview.append(name, previewSpace);
+            row.append(namePreview);
             const appearance = {};
-            if (managerKind === 'tag') {
+            {
                 const preview = styleTag(make('span', 'badge align-self-center', record.name), record);
+                previewSpace.append(preview);
                 for (const [key, caption] of [['text_color', 'Text color'], ['background_color', 'Background color']]) {
                     const picker = make('input', 'form-control form-control-color');
                     picker.type = 'color';
@@ -827,16 +1060,28 @@
                 size.title = 'Font size in pixels';
                 size.setAttribute('aria-label', 'Font size for ' + record.name);
                 appearance.font_size = size;
-                row.append(font, size, preview);
+                row.append(font, size);
                 const updatePreview = () => styleTag(preview, Object.fromEntries(Object.entries(appearance).map(([key, input]) => [key, input.value])));
                 Object.values(appearance).forEach((input) => input.addEventListener('input', updatePreview));
                 name.addEventListener('input', () => { preview.textContent = name.value; });
+            }
+            if (managerKind === 'playlist') {
+                const cover = make('select', 'form-select form-select-sm w-100');
+                cover.setAttribute('aria-label', 'Playlist cover for ' + record.name);
+                cover.add(new Option('Playlist cover: neutral icon', ''));
+                for (const item of record.items) {
+                    const video = videoMap.get(item.video_id);
+                    if (video) cover.add(new Option(video.name, video.id));
+                }
+                cover.value = record.cover_video || '';
+                appearance.cover_video = cover;
+                row.append(cover);
             }
             row.append(button('Save', async () => {
                 const style = Object.fromEntries(Object.entries(appearance).map(([key, input]) => [key, input.value]));
                 await mutate(managerKind + '_save', { id: record.id, name: name.value, ...style }, 'manager-dialog');
             }));
-            row.append(button('Delete', async () => {
+            if (record.id !== 'untagged') row.append(button('Delete', async () => {
                 const detail = managerKind === 'tag' ? 'It will be removed from every video.' : 'Videos will stay in your library.';
                 if (confirm('Delete "' + record.name + '"? ' + detail)) {
                     if (await mutate(managerKind + '_delete', { id: record.id }, 'manager-dialog')) renderManager();
@@ -895,7 +1140,74 @@
         renderLibrary();
         renderPlayer();
         renderMissing();
+        renderAttention();
     }
+
+    function attentionReasons(video) {
+        if (Number(video.missing) || libraryOffline(video)) return [];
+        const reasons = [];
+        if (video.file_size !== null && video.file_size !== undefined && Number(video.file_size) === 0) reasons.push('Empty file');
+        if (Number(video.media_checked)) {
+            if (video.duration === null || video.duration === undefined) reasons.push('Duration unavailable');
+            if (!(Number(video.video_width) > 0 && Number(video.video_height) > 0)) reasons.push('Resolution unavailable');
+        }
+        return reasons;
+    }
+
+    function renderAttention() {
+        const needsAttention = state.videos.some((video) => attentionReasons(video).length > 0);
+        $('open-attention').classList.toggle('btn-outline-warning', needsAttention);
+        $('open-attention').classList.toggle('btn-outline-secondary', !needsAttention);
+        $('attention-files').replaceChildren();
+        for (const video of state.videos) {
+            const reasons = attentionReasons(video);
+            if (!reasons.length) continue;
+            const card = make('div', 'border rounded p-2 d-grid gap-2 text-center');
+            card.append(make('div', 'small fw-semibold text-break', video.filename || video.name), make('div', 'small text-warning border rounded p-2', reasons.join(' · ')));
+            const info = button('', () => {
+                $('attention-name').textContent = video.name;
+                $('attention-reasons').textContent = reasons.join(' · ');
+                $('attention-path').value = video.path;
+                $('attention-copy-status').textContent = '';
+                modal('attention-list-dialog').hide();
+                modal('attention-dialog').show();
+            });
+            info.setAttribute('aria-label', 'File information: ' + video.name);
+            info.append(make('i', 'bi bi-question-circle'));
+            info.title = 'Why this file needs attention';
+            const repair = button('', async () => {
+                repair.disabled = true;
+                try {
+                    const payload = await api('video_repair', { video: video.id });
+                    applyState(payload.state);
+                    alert(payload.repair.message + '\nThe result was recorded in the log.');
+                } catch (error) {
+                    showError(error);
+                    alert(error.message + '\nSee the log for details.');
+                } finally { repair.disabled = false; }
+            });
+            repair.append(make('i', 'bi bi-wrench'));
+            repair.title = 'Try to auto-repair';
+            repair.setAttribute('aria-label', 'Try to auto-repair ' + video.name);
+            const actions = make('div', 'd-flex justify-content-center gap-2');
+            actions.append(info, repair);
+            card.append(actions);
+            $('attention-files').append(card);
+        }
+        if (!$('attention-files').children.length) $('attention-files').append(make('p', 'small text-body-secondary mb-0', 'No flagged files. Files awaiting inspection are not flagged for unknown details.'));
+    }
+
+    $('copy-attention-path').addEventListener('click', async () => {
+        const field = $('attention-path');
+        try {
+            await navigator.clipboard.writeText(field.value);
+            $('attention-copy-status').textContent = 'Path copied.';
+        } catch (_) {
+            field.focus();
+            field.select();
+            $('attention-copy-status').textContent = 'Copy the selected path using your keyboard or context menu.';
+        }
+    });
 
     function renderMissing() {
         $('missing-files').replaceChildren();
@@ -903,6 +1215,8 @@
             $('missing-files').append(make('p', 'small text-body-secondary mb-2', library.name + ': library ' + library.status + '. Records are preserved.'));
         }
         const missing = state.videos.filter((video) => Number(video.missing) && video.library_status === 'online');
+        $('open-missing').classList.toggle('btn-outline-warning', missing.length > 0);
+        $('open-missing').classList.toggle('btn-outline-secondary', missing.length === 0);
         if (!missing.length) $('missing-files').append(make('span', 'small text-body-secondary', 'No missing files.'));
         for (const video of missing) {
             const item = make('div', 'small');
@@ -926,7 +1240,7 @@
         const message = 'Permanently delete ' + videos.length + ' video file(s) from disk and the library?\n\nThis also removes their tags and playlist entries. This cannot be undone.\n\n' + videos.slice(0, 10).map((video) => video.name).join('\n') + (videos.length > 10 ? '\n…and ' + (videos.length - 10) + ' more.' : '');
         if (!window.confirm(message)) return;
         clearError();
-        if (videos.some((video) => video.id === queue[queueIndex])) {
+        if (videos.some((video) => video.id === currentVideoId())) {
             player.pause();
             player.removeAttribute('src');
             player.load();
@@ -964,7 +1278,7 @@
             modal('browse-dialog').show();
         } catch (error) { showError(error); }
     }
-    $('browse-playing').addEventListener('click', () => browseLocation({ video: queue[queueIndex] }));
+    $('browse-playing').addEventListener('click', () => browseLocation({ video: currentVideoId() }));
     $('copy-browse-path').addEventListener('click', async () => {
         try {
             await navigator.clipboard.writeText($('browse-path').value);
@@ -1028,7 +1342,7 @@
                 const count = state.videos.filter((video) => Number(video.library_id) === library.id).length;
                 const message = 'Remove "' + library.name + '" and its ' + count + ' video record(s) from FrameKeep?\n\nNo video files will be deleted from disk. This removes their playlist entries, video-specific tag assignments, and edited display names. Global tags, playlists, and settings are preserved.\n\nTo import the videos again, add this folder as a library and rescan.';
                 if (!confirm(message)) return;
-                const current = videoMap.get(queue[queueIndex]);
+                const current = videoMap.get(currentVideoId());
                 if (await mutate('library_delete', { library: library.id, confirmed: true }, 'settings-dialog')) {
                     if (current && Number(current.library_id) === library.id) {
                         player.pause();
@@ -1177,8 +1491,11 @@
                 try {
                     const response = await fetch(root.dataset.thumbnail + '?id=' + encodeURIComponent(video.id) + '&v=' + state.settings.thumbnail_version, { cache: 'no-store' });
                     const image = await response.blob();
-                    if (!response.ok || !response.headers.get('Content-Type')?.startsWith('image/jpeg') || !image.size) failed++;
-                } catch (_) { failed++; }
+                    if (!response.ok || !response.headers.get('Content-Type')?.startsWith('image/jpeg') || !image.size) {
+                        failed++;
+                        reportError('Thumbnail request did not return an image: ' + video.name, 'HTTP ' + response.status + ' · ' + video.path);
+                    }
+                } catch (error) { failed++; reportError('Thumbnail request failed: ' + video.name, error.message + ' · ' + video.path); }
                 processed++;
                 refreshActivity(true);
             }
@@ -1203,18 +1520,18 @@
         render();
     });
     $('video-search').addEventListener('input', () => { page = 1; renderLibrary(); });
+    $('clear-video-search').addEventListener('click', () => {
+        $('video-search').value = '';
+        page = 1;
+        renderLibrary();
+        $('video-search').focus();
+    });
     for (const id of ['rating-filter', 'duration-filter', 'resolution-filter']) $(id).addEventListener('change', () => { page = 1; renderLibrary(); });
     $('video-sort').addEventListener('change', () => { page = 1; renderLibrary(); });
     $('untagged-only').addEventListener('change', () => {
         if ($('untagged-only').checked) {
-            for (const [id, mode] of tagModes) if (mode === 'include') tagModes.delete(id);
+            tagModes.clear();
         }
-        page = 1;
-        render();
-    });
-    $('clear-filters').addEventListener('click', () => {
-        tagModes.clear();
-        $('untagged-only').checked = false;
         page = 1;
         render();
     });
@@ -1257,7 +1574,16 @@
     $('play-results').addEventListener('click', () => startQueue(visibleVideos().map((video) => video.id)));
     $('previous-video').addEventListener('click', () => advance(-1));
     $('next-video').addEventListener('click', () => advance(1));
-    $('edit-playing').addEventListener('click', () => editVideo(queue[queueIndex]));
+    $('edit-playing').addEventListener('click', () => editVideo(currentVideoId()));
+    $('playlist-playing').addEventListener('click', () => openAssignments(currentVideoId(), 'playlists'));
+    $('assignment-form').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const submit = event.submitter;
+        if (submit) submit.disabled = true;
+        try {
+            if (await mutate(assignmentKind === 'tags' ? 'video_tags_save' : 'video_playlists_add', { video: assignmentVideo, choices: chosenValues('assignment-choices') }, 'assignment-dialog')) modal('assignment-dialog').hide();
+        } finally { if (submit) submit.disabled = false; }
+    });
     $('play-pause').addEventListener('click', () => {
         if (player.paused) player.play().catch((error) => showError(error)); else player.pause();
     });
@@ -1270,14 +1596,53 @@
     $('repeat-mode').addEventListener('change', () => { saveSettings(); renderPlayer(); });
     $('shuffle').addEventListener('click', () => {
         shuffle = !shuffle;
-        if (shuffle && queue.length) {
-            const current = queue[queueIndex];
-            queue = [current, ...randomize(queue.slice(queueIndex + 1))];
-            queueIndex = 0;
+        if (shuffle) unshuffledQueue = [...queue];
+        else if (unshuffledQueue) {
+            const current = currentVideoId();
+            queue = unshuffledQueue.filter((id) => videoMap.has(id));
+            queueIndex = standaloneVideo ? -1 : queue.indexOf(current);
+            unshuffledQueue = null;
+        }
+        if (shuffle && queue.length && standaloneVideo) queue = randomize(queue);
+        else if (shuffle && queue.length) {
+            const current = currentVideoId();
+            const remaining = [...queue];
+            const currentIndex = remaining.indexOf(current);
+            if (currentIndex >= 0) remaining.splice(currentIndex, 1);
+            queue = current ? [current, ...randomize(remaining)] : randomize(remaining);
+            queueIndex = current ? 0 : -1;
         }
         saveSettings();
+        saveQueue();
         renderPlayer();
     });
+    $('clear-queue').addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        standaloneVideo = currentVideoId() || null;
+        queue = [];
+        queueIndex = -1;
+        unshuffledQueue = null;
+        renderPlayer();
+        saveQueue();
+    });
+    $('reset-tag-filters').addEventListener('click', () => {
+        tagModes.clear();
+        $('untagged-only').checked = false;
+        page = 1;
+        render();
+    });
+    for (const id of ['playlists-content', 'tags-content']) {
+        const panel = $(id);
+        const toggle = document.querySelector('[data-bs-target="#' + id + '"]');
+        try {
+            const open = localStorage.getItem('framekeep-' + id) !== 'closed';
+            panel.classList.toggle('show', open);
+            toggle.setAttribute('aria-expanded', String(open));
+        } catch (_) {}
+        panel.addEventListener('shown.bs.collapse', () => { try { localStorage.setItem('framekeep-' + id, 'open'); } catch (_) {} });
+        panel.addEventListener('hidden.bs.collapse', () => { try { localStorage.setItem('framekeep-' + id, 'closed'); } catch (_) {} });
+    }
     $('manage-tags').addEventListener('click', () => openManager('tag'));
     $('manage-playlists').addEventListener('click', () => openManager('playlist'));
     $('video-form').addEventListener('submit', async (event) => {
@@ -1366,13 +1731,17 @@
         }
         playbackReady = true;
         $('autoplay-open').checked = Boolean(saved && Number(saved.autoplay));
-        if (saved && saved.video_id && videoMap.has(saved.video_id)) {
+        if (saved) {
             let previousQueue = [];
             try { previousQueue = JSON.parse(saved.queue); } catch (_) {}
             queue = Array.isArray(previousQueue) ? previousQueue.filter((id) => videoMap.has(id)) : [];
-            if (!queue.includes(saved.video_id)) queue = [saved.video_id];
             queueIndex = Number(saved.queue_index);
-            if (queue[queueIndex] !== saved.video_id) queueIndex = queue.indexOf(saved.video_id);
+            renderPlayer();
+        }
+        if (saved && saved.video_id && videoMap.has(saved.video_id)) {
+            standaloneVideo = Number(saved.queue_index) < 0 || !queue.includes(saved.video_id) ? saved.video_id : null;
+            queueIndex = Number(saved.queue_index);
+            if (currentVideoId() !== saved.video_id) queueIndex = queue.indexOf(saved.video_id);
             playCurrent($('autoplay-open').checked, Number(saved.position));
         }
         if (payload.state.settings && Number(payload.state.settings.scan_on_start)) return scanLibrary();

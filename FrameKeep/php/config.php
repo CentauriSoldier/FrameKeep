@@ -1,5 +1,7 @@
 <?php
 
+require_once __DIR__ . '/log.php';
+
 define('D_ROOT',        $_SERVER['DOCUMENT_ROOT']);
 define('D_PHP',         D_ROOT      . '/php');
 define('D_INCLUDES',    D_ROOT      . '/includes');

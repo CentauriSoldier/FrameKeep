@@ -25,7 +25,7 @@ function libraryState($db) {
     $locations = array_column($libraries, null, 'id');
     $videos = $db->query('SELECT id, name, path, filename, missing, file_size, library_id, rating, duration, video_width, video_height, media_checked FROM videos ORDER BY name COLLATE NOCASE, id')->fetchAll();
     $tags = $db->query('SELECT id, name, text_color, background_color, font, font_size FROM tags ORDER BY name COLLATE NOCASE, id')->fetchAll();
-    $playlists = $db->query('SELECT id, name FROM playlists ORDER BY name COLLATE NOCASE, id')->fetchAll();
+    $playlists = $db->query('SELECT id, name, text_color, background_color, font, font_size, cover_video FROM playlists ORDER BY name COLLATE NOCASE, id')->fetchAll();
     $assignments = array();
 
     foreach ($db->query('SELECT video_id, tag_id FROM video_tags') as $assignment) {
@@ -33,6 +33,7 @@ function libraryState($db) {
     }
 
     foreach ($videos as &$video) {
+        $video['thumbnail_ready'] = false;
         $video['library_status'] = $locations[$video['library_id']]['status'] ?? 'offline';
         $video['library_name'] = $locations[$video['library_id']]['name'] ?? 'Unknown library';
         $video['tags'] = $assignments[$video['id']] ?? array();
@@ -44,6 +45,13 @@ function libraryState($db) {
         }
     }
 
+    unset($video);
+    $offset = (int) $db->query('SELECT thumbnail_time FROM app_settings WHERE id = 1')->fetchColumn();
+    foreach ($videos as &$video) {
+        if (!is_file($video['path']) || !is_readable($video['path'])) continue;
+        $key = thumbnailKey($video['path'], filemtime($video['path']), $offset);
+        $video['thumbnail_ready'] = is_file(D_THUMBNAILS . '/' . $key . '.jpg');
+    }
     unset($video);
     $items = array();
 
@@ -60,7 +68,7 @@ function libraryState($db) {
 
     unset($playlist);
 
-    return array('libraries' => $libraries, 'settings' => $db->query('SELECT scan_on_start, auto_orphan, auto_scan, scan_frequency, thumbnail_size, thumbnail_time, thumbnail_version, scroll_to_player, page_size, fill_last_row FROM app_settings WHERE id = 1')->fetch(), 'videos' => $videos, 'tags' => $tags, 'playlists' => $playlists, 'playback' => $db->query('SELECT video_id, position, autoplay, queue, queue_index, volume, muted FROM playback WHERE id = 1')->fetch());
+    return array('untagged' => json_decode($db->query('SELECT untagged_style FROM app_settings WHERE id = 1')->fetchColumn(), true) ?: array(), 'libraries' => $libraries, 'settings' => $db->query('SELECT scan_on_start, auto_orphan, auto_scan, scan_frequency, thumbnail_size, thumbnail_time, thumbnail_version, scroll_to_player, page_size, fill_last_row FROM app_settings WHERE id = 1')->fetch(), 'videos' => $videos, 'tags' => $tags, 'playlists' => $playlists, 'playback' => $db->query('SELECT video_id, position, autoplay, queue, queue_index, volume, muted FROM playback WHERE id = 1')->fetch());
 }
 
 function requiredName($value) {
@@ -154,30 +162,44 @@ function thumbnailKey($path, $mtime, $offset) {
 }
 
 function inspectMedia($path) {
-    if (!is_file($path) || !is_readable($path) || !function_exists('proc_open') || !is_file(F_FFPROBE)) return null;
+    if (!is_file($path) || !is_readable($path) || !function_exists('proc_open') || !is_file(F_FFPROBE)) {
+        logEvent('Media inspection', 'File or FFprobe is unavailable.', array('path' => $path));
+        return null;
+    }
     $pipes = array();
     $process = proc_open(array(F_FFPROBE, '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height:format=duration', '-of', 'json', $path), array(0 => array('pipe', 'r'), 1 => array('pipe', 'w'), 2 => array('pipe', 'w')), $pipes);
-    if (!is_resource($process)) return null;
+    if (!is_resource($process)) {
+        logEvent('Media inspection', 'Could not start FFprobe.', array('path' => $path));
+        return null;
+    }
     fclose($pipes[0]);
     stream_set_blocking($pipes[1], false);
     stream_set_blocking($pipes[2], false);
     $output = '';
+    $diagnostic = '';
     $deadline = microtime(true) + 5;
     do {
         $output .= stream_get_contents($pipes[1]);
-        stream_get_contents($pipes[2]);
+        $diagnostic = substr($diagnostic . stream_get_contents($pipes[2]), -8000);
         $status = proc_get_status($process);
         if (!$status['running']) break;
         usleep(50000);
     } while (microtime(true) < $deadline);
     if ($status['running']) proc_terminate($process);
     $output .= stream_get_contents($pipes[1]);
+    $diagnostic = substr($diagnostic . stream_get_contents($pipes[2]), -8000);
     fclose($pipes[1]);
     fclose($pipes[2]);
     proc_close($process);
-    if ($status['running']) return null;
+    if ($status['running']) {
+        logEvent('Media inspection', 'FFprobe exceeded its five-second limit.', array('path' => $path, 'detail' => $diagnostic));
+        return null;
+    }
     $data = json_decode($output, true);
-    if (!is_array($data)) return null;
+    if (!is_array($data) || !isset($data['streams'][0])) {
+        logEvent('Media inspection', 'FFprobe returned no readable video stream.', array('path' => $path, 'detail' => $diagnostic));
+        return null;
+    }
     $duration = $data['format']['duration'] ?? null;
     return array('duration' => is_numeric($duration) && (float) $duration >= 0 ? (float) $duration : null, 'video_width' => $data['streams'][0]['width'] ?? null, 'video_height' => $data['streams'][0]['height'] ?? null);
 }

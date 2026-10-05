@@ -61,6 +61,38 @@
         </form>
     </div>
 </div>
+<div class="modal fade" id="attention-dialog" tabindex="-1" aria-labelledby="attention-title" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-scrollable"><div class="modal-content">
+        <div class="modal-header"><h2 class="modal-title fs-5" id="attention-title">File needing attention</h2><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
+        <div class="modal-body"><p class="fw-semibold text-break" id="attention-name"></p><p id="attention-reasons"></p><p class="small text-body-secondary">An empty file contains no video data. Unavailable duration or resolution means inspection did not obtain that information; it does not prove the file is damaged. Check playback and the error log.</p><label class="form-label" for="attention-path">File path</label><textarea class="form-control" id="attention-path" rows="3" readonly></textarea><p class="small mt-2 mb-0" id="attention-copy-status" role="status"></p></div>
+        <div class="modal-footer"><button class="btn btn-info" id="copy-attention-path" type="button">Copy path</button><button class="btn btn-secondary" type="button" data-bs-dismiss="modal">Close</button></div>
+    </div></div>
+</div>
+
+<div class="modal fade" id="log-dialog" tabindex="-1" aria-labelledby="log-title" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable"><div class="modal-content">
+        <div class="modal-header"><h2 class="modal-title fs-5" id="log-title">Error log</h2><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
+        <div class="modal-body"><p class="small text-body-secondary">Newest events first. Logs may include private file paths.</p><div id="log-events" class="d-grid gap-2"></div><p class="dialog-error text-danger mt-2" role="alert"></p></div>
+        <div class="modal-footer"><p class="small w-100 mb-0" id="log-copy-status" role="status"></p><textarea class="form-control w-100" id="log-copy-text" rows="4" readonly hidden aria-label="Log text for manual copying"></textarea><button class="btn btn-outline-secondary" id="copy-all-log" type="button">Copy all</button><button class="btn btn-outline-secondary" id="refresh-log" type="button">Refresh</button><button class="btn btn-outline-danger" id="clear-log" type="button">Clear log</button><a class="btn btn-info" href="php/log_api.php?action=download">Download log</a><button class="btn btn-secondary" type="button" data-bs-dismiss="modal">Close</button></div>
+    </div></div>
+</div>
+
+<div class="modal fade" id="tag-help-dialog" tabindex="-1" aria-labelledby="tag-help-title" aria-hidden="true">
+    <div class="modal-dialog"><div class="modal-content">
+        <div class="modal-header"><h2 class="modal-title fs-5" id="tag-help-title">Tag filters</h2><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
+        <div class="modal-body"><p>The tag name stays fixed beneath the sliding control.</p><ul><li>Left: Exclude videos with this tag.</li><li>Center: Ignore this tag when filtering.</li><li>Right: Include videos with this tag.</li><li>Solo: Include this tag and exclude every other tag, showing videos with only this tag.</li></ul><p class="mb-0">Reset tag filters returns all sliders to the center. Filters do not change the tags assigned to your videos.</p></div>
+        <div class="modal-footer"><button class="btn btn-secondary" type="button" data-bs-dismiss="modal">Close</button></div>
+    </div></div>
+</div>
+
+<div class="modal fade" id="assignment-dialog" tabindex="-1" aria-labelledby="assignment-title" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-scrollable"><form class="modal-content" id="assignment-form">
+        <div class="modal-header"><h2 class="modal-title fs-5" id="assignment-title">Tag video</h2><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
+        <div class="modal-body"><p class="fw-semibold" id="assignment-video-name"></p><p class="small text-body-secondary" id="assignment-note"></p><div class="d-grid gap-2" id="assignment-choices"></div></div>
+        <div class="modal-footer"><span class="small text-danger me-auto dialog-error" role="alert"></span><button class="btn btn-secondary" type="button" data-bs-dismiss="modal">Cancel</button><button class="btn btn-info" type="submit">Save</button></div>
+    </form></div>
+</div>
+
 <div class="modal fade" id="details-dialog" tabindex="-1" aria-labelledby="details-title" aria-hidden="true">
     <div class="modal-dialog modal-lg modal-dialog-scrollable">
         <div class="modal-content">
@@ -132,3 +164,19 @@
 </div>
 
 <?php require_once F_HELP; ?>
+
+<div class="modal fade" id="missing-list-dialog" tabindex="-1" aria-labelledby="missing-heading" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable"><div class="modal-content">
+        <div class="modal-header"><h2 class="modal-title fs-5" id="missing-heading">Missing files</h2><button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Close"></button></div>
+        <div class="modal-body"><div id="missing-files" class="d-grid gap-3"></div></div>
+        <div class="modal-footer"><button class="btn btn-secondary" type="button" data-bs-dismiss="modal">Close</button></div>
+    </div></div>
+</div>
+
+<div class="modal fade" id="attention-list-dialog" tabindex="-1" aria-labelledby="attention-heading" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable"><div class="modal-content">
+        <div class="modal-header"><h2 class="modal-title fs-5" id="attention-heading">Attention</h2><button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Close"></button></div>
+        <div class="modal-body"><div id="attention-files" class="d-grid gap-3"></div></div>
+        <div class="modal-footer"><button class="btn btn-secondary" type="button" data-bs-dismiss="modal">Close</button></div>
+    </div></div>
+</div>

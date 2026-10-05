@@ -61,6 +61,7 @@ function scanVideos($db) {
 
                 if ($entries === false) {
                     $result['errors'][] = $folder;
+                    logEvent('Scan', 'Could not read folder.', array('path' => $folder));
                     $statuses[$libraryId] = 'incomplete';
 
                     continue;
@@ -100,6 +101,7 @@ function scanVideos($db) {
                     if ($size === false) {
                         $statuses[$libraryId] = 'incomplete';
                         $result['errors'][] = $path;
+                        logEvent('Scan', 'Could not inspect file.', array('path' => $path));
                     }
                 }
             }

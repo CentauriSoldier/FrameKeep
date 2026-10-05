@@ -15,6 +15,7 @@ try {
     header('Cache-Control: no-store');
     readfile($backup);
 } catch (Throwable $error) {
+    logEvent('Database backup', $error->getMessage());
     http_response_code(500);
     header('Content-Type: text/plain; charset=utf-8');
     echo 'Database backup failed: ' . $error->getMessage();

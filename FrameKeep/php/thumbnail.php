@@ -16,6 +16,7 @@ $query->closeCursor();
 $query = null;
 
 if ($path === false || !is_file($path) || !is_readable($path)) {
+    logEvent('Thumbnail', 'Video file is unavailable or unreadable.', array('video' => $id, 'path' => $path));
     $db = null;
     placeholderThumbnail();
     exit;
@@ -47,6 +48,7 @@ if ($lock && flock($lock, LOCK_EX)) {
         $job = D_THUMBNAILS . '/' . $key . '.job.json';
         file_put_contents($job, json_encode(array('current' => basename(str_replace('\\', '/', $path)), 'updated' => microtime(true)), JSON_INVALID_UTF8_SUBSTITUTE), LOCK_EX);
         try {
+            $diagnostic = '';
             $deadline = microtime(true) + 12;
             foreach (array_unique(array($offset, 0)) as $seek) {
                 if (microtime(true) >= $deadline) break;
@@ -58,12 +60,16 @@ if ($lock && flock($lock, LOCK_EX)) {
                 stream_set_blocking($pipes[2], false);
                 do {
                     stream_get_contents($pipes[1]);
-                    stream_get_contents($pipes[2]);
+                    $diagnostic = substr($diagnostic . stream_get_contents($pipes[2]), -8000);
                     $status = proc_get_status($process);
                     if (!$status['running']) break;
                     usleep(50000);
                 } while (microtime(true) < $deadline);
-                if ($status['running']) proc_terminate($process);
+                if ($status['running']) {
+                    $diagnostic .= ' Thumbnail generation exceeded its twelve-second limit.';
+                    proc_terminate($process);
+                }
+                $diagnostic = substr($diagnostic . stream_get_contents($pipes[2]), -8000);
                 fclose($pipes[1]);
                 fclose($pipes[2]);
                 proc_close($process);
@@ -73,6 +79,7 @@ if ($lock && flock($lock, LOCK_EX)) {
                     break;
                 }
             }
+            if (!is_file($cache)) logEvent('Thumbnail', 'Could not generate thumbnail.', array('path' => $path, 'offset' => $offset, 'detail' => $diagnostic ?: 'FFmpeg did not produce an image.'));
         } finally {
             if (is_file($job)) unlink($job);
         }
@@ -86,5 +93,6 @@ if (is_file($cache)) {
     header('Cache-Control: public, max-age=86400');
     readfile($cache);
 } else {
+    if (!function_exists('proc_open')) logEvent('Thumbnail', 'PHP process execution is unavailable.', array('path' => $path));
     placeholderThumbnail();
 }
