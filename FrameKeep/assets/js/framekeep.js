@@ -26,6 +26,7 @@
     let paginationSequence = 0;
     let queue = [];
     let unshuffledQueue = null;
+    let draggedQueueIndex = null;
     let queueIndex = -1;
     let standaloneVideo = null;
     function currentVideoId() { return standaloneVideo || queue[queueIndex]; }
@@ -361,6 +362,8 @@
         let videos = playlist ? playlist.items.map((item) => videoMap.get(item.video_id)).filter(Boolean) : [...state.videos];
         const search = $('video-search').value.trim().toLocaleLowerCase();
         videos = videos.filter((video) => {
+            const needsAttention = attentionReasons(video).length > 0;
+            if ($('attention-filter').value === 'only' ? !needsAttention : needsAttention) return false;
             const rating = $('rating-filter').value;
             if (rating !== 'all' && (rating === '0' ? Number(video.rating) !== 0 : Number(video.rating) < Number(rating))) return false;
             const duration = $('duration-filter').value;
@@ -533,10 +536,10 @@
         $('tag-filters').style.setProperty('--tag-control-width', Math.ceil((longest + 12) * 2 + 22) + 'px');
         const playlistMeasure = document.createElement('canvas').getContext('2d');
         let playlistWidth = 0;
-        const entries = [$('all-videos'), ...$('playlist-list').querySelectorAll('button')];
+        const entries = [$('all-videos'), ...$('playlist-list').querySelectorAll('.playlist-card')];
         for (const entry of entries) {
             playlistMeasure.font = getComputedStyle(entry).font;
-            playlistWidth = Math.max(playlistWidth, playlistMeasure.measureText(entry.textContent).width + 24);
+            playlistWidth = Math.max(playlistWidth, playlistMeasure.measureText(entry.querySelector('.playlist-title').textContent).width + 24, 120);
         }
         for (const entry of entries) { entry.style.width = Math.ceil(playlistWidth) + 'px'; entry.style.maxWidth = '100%'; }
     }
@@ -639,6 +642,12 @@
             actions.append(button('Tag', () => openAssignments(video.id, 'tags')));
             actions.append(button('Details', () => showDetails(video.id)));
             actions.append(button('Path', () => browseLocation({ video: video.id })));
+            const refresh = button('', () => refreshFileDetails(video, refresh), 'btn btn-sm ' + (attentionReasons(video).length ? 'btn-outline-warning' : 'btn-outline-secondary'));
+            refresh.append(make('i', 'bi bi-wrench'));
+            refresh.title = 'Refresh file details';
+            refresh.setAttribute('aria-label', 'Refresh file details for ' + video.name);
+            refresh.disabled = libraryOffline(video) || Boolean(Number(video.missing));
+            actions.append(refresh);
             actions.append(button('Delete', () => deleteVideos([video.id]), 'btn btn-sm btn-outline-danger'));
             if (playlist) {
                 actions.append(button('Remove', async () => {
@@ -853,12 +862,13 @@
             const control = make('input', 'form-check-input m-0');
             control.type = 'checkbox';
             control.checked = assigned;
-            control.disabled = !video || (!video.tags.length && !untaggedUnlocked.has(video.id));
+            control.disabled = !video;
             control.addEventListener('change', async () => {
                 const wanted = control.checked;
+                if (wanted) clearTags.checked = false;
                 control.disabled = true;
                 const saved = await mutate('video_tag', { video: video.id, tag: tag.id, assigned: wanted });
-                if (!saved) control.checked = assigned;
+                if (!saved) { control.checked = assigned; renderPlayer(); }
                 control.disabled = false;
             });
             label.classList.toggle('border-info', assigned);
@@ -887,6 +897,11 @@
         $('edit-playing').disabled = !video;
         $('browse-playing').disabled = !video;
         $('playlist-playing').disabled = !video;
+        const refresh = $('refresh-playing');
+        refresh.disabled = !video || libraryOffline(video) || Boolean(Number(video.missing));
+        const flagged = Boolean(video && attentionReasons(video).length);
+        refresh.classList.toggle('btn-outline-warning', flagged);
+        refresh.classList.toggle('btn-outline-secondary', !flagged);
         $('play-pause').disabled = !video || libraryOffline(video) || Boolean(Number(video.missing));
         $('previous-video').disabled = !video || !queue.length || Boolean(standaloneVideo) || (queueIndex === 0 && $('repeat-mode').value !== 'queue');
         $('next-video').disabled = !video || !queue.length || (queueIndex === queue.length - 1 && $('repeat-mode').value !== 'queue');
@@ -897,11 +912,51 @@
         queue.forEach((id, index) => {
             const video = videoMap.get(id);
             if (!video) return;
-            const entry = button((index + 1) + '. ' + video.name, () => {
+            const entry = make('div', 'list-group-item list-group-item-action');
+            const playEntry = () => {
                 standaloneVideo = null;
                 queueIndex = index;
                 playCurrent();
-            }, 'list-group-item list-group-item-action');
+            };
+            const play = button('', playEntry, 'btn text-start text-reset d-flex align-items-center gap-2 flex-grow-1 p-0');
+            play.setAttribute('aria-label', 'Play ' + video.name);
+            const remove = button('×', () => {
+                if (!standaloneVideo && queueIndex === index) { standaloneVideo = id; queueIndex = -1; }
+                else if (queueIndex > index) queueIndex--;
+                queue.splice(index, 1);
+                if (unshuffledQueue) {
+                    const originalIndex = unshuffledQueue.indexOf(id);
+                    if (originalIndex >= 0) unshuffledQueue.splice(originalIndex, 1);
+                }
+                renderPlayer();
+                saveQueue();
+            }, 'btn btn-sm btn-outline-secondary flex-shrink-0');
+            remove.setAttribute('aria-label', 'Remove ' + video.name + ' from queue');
+            entry.draggable = true;
+            entry.addEventListener('dragstart', (event) => {
+                draggedQueueIndex = index;
+                event.dataTransfer.effectAllowed = 'move';
+                event.dataTransfer.setData('text/plain', String(index));
+            });
+            entry.addEventListener('dragend', () => { draggedQueueIndex = null; });
+            entry.addEventListener('dragover', (event) => { if (draggedQueueIndex !== null) event.preventDefault(); });
+            entry.addEventListener('drop', (event) => {
+                event.preventDefault();
+                const from = draggedQueueIndex;
+                draggedQueueIndex = null;
+                if (from === null || from === index) return;
+                if (!standaloneVideo && queueIndex >= 0) {
+                    if (queueIndex === from) queueIndex = index;
+                    else if (from < queueIndex && index >= queueIndex) queueIndex--;
+                    else if (from > queueIndex && index <= queueIndex) queueIndex++;
+                }
+                const moved = queue.splice(from, 1)[0];
+                queue.splice(index, 0, moved);
+                shuffle = false;
+                unshuffledQueue = null;
+                renderPlayer();
+                saveQueue();
+            });
             entry.classList.toggle('active', index === queueIndex);
             entry.classList.add('d-flex', 'align-items-center', 'gap-2');
             const label = make('span', '', (index + 1) + '. ' + video.name);
@@ -919,7 +974,8 @@
                 image.addEventListener('error', () => preview.replaceChildren(make('i', 'bi bi-film')));
                 preview.append(image);
             } else preview.append(make('i', 'bi bi-film'));
-            entry.replaceChildren(preview, label);
+            play.append(preview, label);
+            entry.replaceChildren(remove, play);
             $('playback-queue').append(entry);
         });
     }
@@ -945,18 +1001,20 @@
             container.append(label);
         }
         if (tagList) {
-            const label = styleTag(make('label', 'form-check border rounded p-2'), untaggedStyle());
+            const label = make('label', 'form-check');
             const input = make('input', 'form-check-input');
             input.type = 'checkbox'; input.value = 'untagged'; input.checked = !chosen.length;
             label.append(input, make('span', 'form-check-label', 'Untagged'));
             const update = () => {
                 for (const other of container.querySelectorAll('input')) {
                     if (other === input) continue;
-                    other.disabled = input.checked;
                     if (input.checked) other.checked = false;
                 }
             };
             input.addEventListener('change', update);
+            for (const other of container.querySelectorAll('input')) {
+                other.addEventListener('change', () => { if (other.checked) input.checked = false; });
+            }
             update();
             container.append(label);
         }
@@ -1153,6 +1211,23 @@
         }
         return reasons;
     }
+
+    async function refreshFileDetails(video, control) {
+        control.disabled = true;
+        try {
+            const payload = await api('video_repair', { video: video.id });
+            applyState(payload.state);
+            alert(payload.repair.message + '\nThe result was recorded in the log.');
+        } catch (error) {
+            showError(error);
+            alert(error.message + '\nSee the log for details.');
+        } finally { control.disabled = false; }
+    }
+
+    $('refresh-playing').addEventListener('click', () => {
+        const video = videoMap.get(currentVideoId());
+        if (video) refreshFileDetails(video, $('refresh-playing'));
+    });
 
     function renderAttention() {
         const needsAttention = state.videos.some((video) => attentionReasons(video).length > 0);
@@ -1526,7 +1601,17 @@
         renderLibrary();
         $('video-search').focus();
     });
-    for (const id of ['rating-filter', 'duration-filter', 'resolution-filter']) $(id).addEventListener('change', () => { page = 1; renderLibrary(); });
+    for (const id of ['rating-filter', 'duration-filter', 'resolution-filter', 'attention-filter']) $(id).addEventListener('change', () => { page = 1; renderLibrary(); });
+    function clearLibraryFilters(clearSearch = false) {
+        for (const id of ['rating-filter', 'duration-filter', 'resolution-filter']) $(id).value = 'all';
+        $('attention-filter').value = 'exclude';
+        $('video-sort').value = 'default';
+        if (clearSearch) $('video-search').value = '';
+        page = 1;
+        renderLibrary();
+    }
+    $('clear-library-filters').addEventListener('click', () => clearLibraryFilters());
+    $('clear-search-filters').addEventListener('click', () => clearLibraryFilters(true));
     $('video-sort').addEventListener('change', () => { page = 1; renderLibrary(); });
     $('untagged-only').addEventListener('change', () => {
         if ($('untagged-only').checked) {

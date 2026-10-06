@@ -52,7 +52,7 @@ define('F_BOOTSTRAP_ICONS_CSS',     D_CSS       . '/bootstrap-icons.min.css');
 define('F_BOOTSTRAP_ICONS_WOFF',    D_FONTS     . '/bootstrap-icons.woff');
 define('F_BOOTSTRAP_ICONS_WOFF2',   D_FONTS     . '/bootstrap-icons.woff2');
 
-define('APP_VERSION',       '0.3');
+define('APP_VERSION',       '0.4');
 
 define('SCAN_FREQUENCY',    300);
 

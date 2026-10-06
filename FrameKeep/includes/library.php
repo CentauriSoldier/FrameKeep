@@ -26,14 +26,17 @@
             <div class="col-12 col-md-auto"><label class="visually-hidden" for="video-sort">Sort videos</label><select class="form-select" id="video-sort"><option value="default">Playlist order / name</option><option value="asc">Name A–Z</option><option value="desc">Name Z–A</option><option value="rating">Rating high–low</option><option value="duration">Duration short–long</option><option value="resolution">Resolution high–low</option></select></div>
         </div>
         <div class="d-flex flex-wrap align-items-end gap-2 mb-3">
-            <div><label class="form-label small" for="rating-filter">Rating</label><select id="rating-filter" class="form-select form-select-sm"><option value="all">All ratings</option><option value="0">Unrated</option><option value="1">1+ stars</option><option value="2">2+ stars</option><option value="3">3+ stars</option><option value="4">4+ stars</option><option value="5">5 stars</option></select></div>
-            <div><label class="form-label small" for="duration-filter">Duration</label><select id="duration-filter" class="form-select form-select-sm"><option value="all">Any duration</option><option value="short">Under 10 minutes</option><option value="medium">10–60 minutes</option><option value="long">1 hour or longer</option><option value="unknown">Unknown duration</option></select></div>
-            <div><label class="form-label small" for="resolution-filter">Resolution</label><select id="resolution-filter" class="form-select form-select-sm"><option value="all">Any resolution</option><option value="720">720p or higher</option><option value="1080">1080p or higher</option><option value="2160">2160p or higher</option><option value="unknown">Unknown resolution</option></select></div>
-        <div class="d-flex flex-wrap align-items-center gap-2 ms-auto">
-            <div class="d-flex flex-wrap gap-2" role="group" aria-label="Results">
-                <button class="btn btn-sm btn-outline-secondary" id="play-results" type="button">Play results</button>
-                <button class="btn btn-sm btn-outline-secondary" id="select-results" type="button">Select results</button>
-            </div>
+            <div><label class="form-label small" for="attention-filter">Attention</label><select id="attention-filter" class="form-select form-select-sm"><option value="exclude">Exclude</option><option value="only">Only</option></select></div>
+            <div><label class="form-label small" for="rating-filter">Rating</label><select id="rating-filter" class="form-select form-select-sm"><option value="all">Any</option><option value="0">Unrated</option><option value="1">1+</option><option value="2">2+</option><option value="3">3+</option><option value="4">4+</option><option value="5">5</option></select></div>
+            <div><label class="form-label small" for="duration-filter">Duration (mins)</label><select id="duration-filter" class="form-select form-select-sm"><option value="all">Any</option><option value="short">&lt;10</option><option value="medium">10–60</option><option value="long">60+</option><option value="unknown">Unknown</option></select></div>
+            <div><label class="form-label small" for="resolution-filter">Resolution</label><select id="resolution-filter" class="form-select form-select-sm"><option value="all">Any</option><option value="720">720p+</option><option value="1080">1080p+</option><option value="2160">2160p+</option><option value="unknown">Unknown</option></select></div>
+            <button class="btn btn-sm btn-outline-secondary" id="clear-library-filters" type="button">Clear filters</button>
+            <button class="btn btn-sm btn-outline-secondary" id="clear-search-filters" type="button">Clear search &amp; filters</button>
+        <div class="d-flex flex-wrap align-items-end gap-2 ms-auto">
+            <div role="group" aria-label="Results"><div class="form-label small">Results</div><div class="d-flex flex-wrap gap-2">
+                <button class="btn btn-sm btn-outline-secondary" id="play-results" type="button">Play</button>
+                <button class="btn btn-sm btn-outline-secondary" id="select-results" type="button">Select</button>
+            </div></div>
             <div class="d-flex flex-wrap align-items-center gap-2 border-start ps-3 ms-1" role="group" aria-label="Selection actions">
                 <span class="small text-body-secondary">Selection</span>
                 <button class="btn btn-sm btn-outline-secondary" id="batch-playlist" type="button" disabled>Add / move to playlist</button>
