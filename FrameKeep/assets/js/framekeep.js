@@ -1043,10 +1043,75 @@
         clearError('video-dialog');
         $('video-name').value = video.name;
         $('video-location').textContent = video.path;
+        prepareThumbnailPreview(video);
         checkboxes($('video-tags'), state.tags, video.tags);
         checkboxes($('video-playlists'), state.playlists, state.playlists.filter((playlist) => playlist.items.some((item) => item.video_id === id)).map((playlist) => playlist.id));
         modal('video-dialog').show();
     }
+
+
+    function prepareThumbnailPreview(video) {
+        const preview = $('video-thumbnail-preview');
+        const slider = $('video-thumbnail-time');
+        const selectedTime = Number(video.thumbnail_custom_time ?? state.settings.thumbnail_time);
+        $('video-thumbnail-current').textContent = 'Current time: ' + selectedTime + ' s (' + (video.thumbnail_custom_time == null ? 'global default' : 'custom') + ')';
+        $('video-thumbnail-position').textContent = selectedTime + ' s';
+        $('video-thumbnail-status').textContent = 'Select a frame, then Set thumbnail. This saves immediately, independently of the other Edit fields.';
+        slider.disabled = true;
+        $('set-video-thumbnail').disabled = true;
+        preview.pause();
+        preview.onloadedmetadata = () => {
+            if (editingVideo !== video.id || !Number.isFinite(preview.duration) || preview.duration <= 0) return;
+            slider.max = Math.max(0, Math.ceil(preview.duration) - 1);
+            slider.value = Math.min(selectedTime, Number(slider.max));
+            slider.disabled = false;
+            $('set-video-thumbnail').disabled = false;
+            preview.currentTime = Number(slider.value);
+            $('video-thumbnail-position').textContent = slider.value + ' s';
+        };
+        preview.onerror = () => { $('video-thumbnail-status').textContent = 'This browser cannot preview this video format. No thumbnail changes were saved.'; };
+        if (libraryOffline(video) || Number(video.missing)) {
+            preview.removeAttribute('src'); preview.load();
+            $('video-thumbnail-status').textContent = 'The video file is unavailable.';
+            return;
+        }
+        const url = new URL(root.dataset.stream, document.baseURI);
+        url.searchParams.set('id', video.id);
+        preview.src = url.href;
+        preview.load();
+    }
+    $('video-thumbnail-time').addEventListener('input', () => {
+        const time = Number($('video-thumbnail-time').value);
+        $('video-thumbnail-position').textContent = time + ' s';
+        $('video-thumbnail-preview').currentTime = time;
+    });
+    $('video-dialog').addEventListener('hidden.bs.modal', () => {
+        const preview = $('video-thumbnail-preview');
+        preview.onloadedmetadata = null; preview.onerror = null;
+        preview.pause(); preview.removeAttribute('src'); preview.load();
+    });
+    $('set-video-thumbnail').addEventListener('click', async () => {
+        const id = editingVideo;
+        const time = Number($('video-thumbnail-time').value);
+        $('set-video-thumbnail').disabled = true;
+        $('video-thumbnail-status').textContent = 'Saving time and generating thumbnail…';
+        try {
+            const payload = await api('video_thumbnail_time', { video: id, time });
+            applyState(payload.state);
+            const response = await fetch(root.dataset.thumbnail + '?id=' + encodeURIComponent(id) + '&regenerate=1&v=' + state.settings.thumbnail_version, { cache: 'no-store' });
+            const blob = await response.blob();
+            if (!response.ok || !response.headers.get('Content-Type')?.startsWith('image/jpeg') || !blob.size) throw new Error('The custom time was saved, but thumbnail generation failed. See the log for details.');
+            if (editingVideo === id) {
+                $('video-thumbnail-current').textContent = 'Current time: ' + time + ' s (custom)';
+                $('video-thumbnail-status').textContent = 'Thumbnail saved. Rescans and cache clearing preserve this time.';
+            }
+            render();
+            refreshActivity(true);
+        } catch (error) {
+            showError(error, 'video-dialog');
+            $('video-thumbnail-status').textContent = error.message;
+        } finally { if (editingVideo === id) $('set-video-thumbnail').disabled = false; }
+    });
 
     function chosenValues(id) {
         return [...$(id).querySelectorAll('input:checked')].filter((input) => input.value !== 'untagged').map((input) => Number(input.value));
@@ -1542,8 +1607,12 @@
         saveGlobalSettings();
     });
     $('clear-thumbnails').addEventListener('click', async () => {
-        if (!confirm('Clear all cached thumbnails? They will regenerate when viewed. Your video files are untouched.')) return;
+        if (!confirm('Clear all cached thumbnails? They will regenerate when viewed. Custom thumbnail times are preserved. Your video files are untouched.')) return;
         if (await mutate('thumbnail_clear', {}, 'settings-dialog')) $('scan-status').textContent = 'Thumbnail cache cleared.';
+    });
+    $('reset-thumbnail-times').addEventListener('click', async () => {
+        if (!confirm('Reset all thumbnail times? This removes every custom choice and makes all videos use the global default. Images regenerate as needed; video files are untouched.')) return;
+        if (await mutate('thumbnail_times_reset', {}, 'settings-dialog')) $('scan-status').textContent = 'Custom thumbnail times reset to the global default.';
     });
     $('generate-thumbnails').addEventListener('click', async () => {
         if (bulkThumbnailsRunning) return;

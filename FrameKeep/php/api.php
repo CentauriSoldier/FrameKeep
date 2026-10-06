@@ -243,6 +243,24 @@ try {
         $db->beginTransaction();
 
         switch ($action) {
+            case 'video_thumbnail_time':
+                $id = (string) ($input['video'] ?? '');
+                requireRecord($db, 'videos', $id);
+                $time = filter_var($input['time'] ?? null, FILTER_VALIDATE_INT);
+                if ($time === false || $time < 0) throw new InvalidArgumentException('Choose a valid thumbnail time.');
+                $query = $db->prepare('SELECT duration FROM videos WHERE id = ?');
+                $query->execute(array($id));
+                $duration = $query->fetchColumn();
+                if ($duration !== null && $duration !== false && $time >= (float) $duration) throw new InvalidArgumentException('Choose a time before the video ends.');
+                $query = $db->prepare('UPDATE videos SET thumbnail_custom_time = ?, thumbnail_key = NULL, thumbnail_offset = NULL WHERE id = ?');
+                $query->execute(array($time, $id));
+                $db->exec('UPDATE app_settings SET thumbnail_version = thumbnail_version + 1 WHERE id = 1');
+                break;
+            case 'thumbnail_times_reset':
+                $db->exec('UPDATE videos SET thumbnail_custom_time = NULL, thumbnail_key = NULL, thumbnail_offset = NULL WHERE thumbnail_custom_time IS NOT NULL');
+                $db->exec('UPDATE app_settings SET thumbnail_version = thumbnail_version + 1 WHERE id = 1');
+                break;
+
             case 'video_tags_bulk':
                 $videos = array_unique($input['videos'] ?? array());
                 $tags = array_unique(array_map('intval', $input['tags'] ?? array()));

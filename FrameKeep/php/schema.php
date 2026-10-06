@@ -6,7 +6,7 @@ $db->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
 $db->exec('PRAGMA foreign_keys = ON');
 $db->exec('PRAGMA busy_timeout = 5000');
 
-$schemaVersion = 3;
+$schemaVersion = 4;
 if ((int) $db->query('PRAGMA user_version')->fetchColumn() >= $schemaVersion) return;
 
 $db->exec('PRAGMA busy_timeout = 30000');
@@ -150,6 +150,7 @@ try {
         $db->exec('ALTER TABLE playlists ADD COLUMN font_size INTEGER NOT NULL DEFAULT 12');
         $db->exec('ALTER TABLE playlists ADD COLUMN cover_video TEXT');
     }
+    if (!in_array('thumbnail_custom_time', $columns, true)) $db->exec('ALTER TABLE videos ADD COLUMN thumbnail_custom_time INTEGER');
     $db->exec('PRAGMA user_version = ' . $schemaVersion);
     $db->exec('COMMIT');
     $schemaTransaction = false;

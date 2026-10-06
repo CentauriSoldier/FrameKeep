@@ -23,7 +23,7 @@ function libraryLocations($db) {
 function libraryState($db) {
     $libraries = libraryLocations($db);
     $locations = array_column($libraries, null, 'id');
-    $videos = $db->query('SELECT id, name, path, filename, missing, file_size, library_id, rating, duration, video_width, video_height, media_checked FROM videos ORDER BY name COLLATE NOCASE, id')->fetchAll();
+    $videos = $db->query('SELECT id, name, path, filename, missing, file_size, library_id, rating, duration, video_width, video_height, media_checked, thumbnail_custom_time FROM videos ORDER BY name COLLATE NOCASE, id')->fetchAll();
     $tags = $db->query('SELECT id, name, text_color, background_color, font, font_size FROM tags ORDER BY name COLLATE NOCASE, id')->fetchAll();
     $playlists = $db->query('SELECT id, name, text_color, background_color, font, font_size, cover_video FROM playlists ORDER BY name COLLATE NOCASE, id')->fetchAll();
     $assignments = array();
@@ -49,7 +49,7 @@ function libraryState($db) {
     $offset = (int) $db->query('SELECT thumbnail_time FROM app_settings WHERE id = 1')->fetchColumn();
     foreach ($videos as &$video) {
         if (!is_file($video['path']) || !is_readable($video['path'])) continue;
-        $key = thumbnailKey($video['path'], filemtime($video['path']), $offset);
+        $key = thumbnailKey($video['path'], filemtime($video['path']), $video['thumbnail_custom_time'] ?? $offset);
         $video['thumbnail_ready'] = is_file(D_THUMBNAILS . '/' . $key . '.jpg');
     }
     unset($video);

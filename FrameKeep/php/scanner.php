@@ -121,12 +121,13 @@ function scanVideos($db) {
                 if ($sizes[$path] !== null) $scannedSizes[(string) $sizes[$path]] = true;
             }
             $orphan = $db->prepare('DELETE FROM videos WHERE id = ?');
-            $known = $db->query('SELECT id, path, filename, file_size, library_id FROM videos')->fetchAll();
+            $known = $db->query('SELECT id, path, filename, file_size, library_id, thumbnail_custom_time FROM videos')->fetchAll();
             writeScanProgress('matching', '', 0, count($known), count($videos), true);
             $processed = 0;
             $mediaReset = $db->prepare('UPDATE videos SET media_checked = 0, duration = NULL, video_width = NULL, video_height = NULL, media_mtime = ? WHERE path = ? AND media_mtime IS NOT ?');
             $keyUpdate = $db->prepare('UPDATE videos SET thumbnail_key = ?, thumbnail_offset = ? WHERE path = ?');
             $knownPaths = array_column($known, 'id', 'path');
+            $customTimes = array_column($known, 'thumbnail_custom_time', 'id');
             $missingNames = array();
             $missingSizes = array();
             $missingIdentities = array();
@@ -176,7 +177,9 @@ function scanVideos($db) {
             foreach ($videos as $path => $name) {
                 writeScanProgress('importing', basename(str_replace('\\', '/', $path)), ++$processed, count($videos), count($videos));
                 $mediaReset->execute(array($mediaTimes[$path], $path, $mediaTimes[$path]));
-                $keyUpdate->execute(array($thumbnailKeys[$path], $thumbnailTime, $path));
+                $effectiveTime = isset($knownPaths[$path]) ? ($customTimes[$knownPaths[$path]] ?? $thumbnailTime) : $thumbnailTime;
+                $effectiveKey = $mediaTimes[$path] === null ? null : thumbnailKey($path, $mediaTimes[$path], $effectiveTime);
+                $keyUpdate->execute(array($effectiveKey, $effectiveTime, $path));
                 $filename = basename(str_replace('\\', '/', $path));
                 $inventory->execute(array($path, $filename, $sizes[$path], $owners[$path]));
                 if (isset($knownPaths[$path]) || isset($missingNames[$filename]) || ($sizes[$path] !== null && isset($missingSizes[(string) $sizes[$path]]))) continue;

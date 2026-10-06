@@ -8,7 +8,7 @@ function placeholderThumbnail() {
 }
 
 $id = (string) ($_GET['id'] ?? '');
-$query = $db->prepare('SELECT videos.path, videos.thumbnail_key, videos.thumbnail_offset FROM videos JOIN libraries ON libraries.id = videos.library_id WHERE videos.id = ? AND libraries.enabled = 1');
+$query = $db->prepare('SELECT videos.path, videos.thumbnail_key, videos.thumbnail_offset, videos.thumbnail_custom_time FROM videos JOIN libraries ON libraries.id = videos.library_id WHERE videos.id = ? AND libraries.enabled = 1');
 $query->execute(array($id));
 $video = $query->fetch(PDO::FETCH_ASSOC);
 $path = $video['path'] ?? false;
@@ -23,6 +23,7 @@ if ($path === false || !is_file($path) || !is_readable($path)) {
 }
 
 $offset = (int) $db->query('SELECT thumbnail_time FROM app_settings WHERE id = 1')->fetchColumn();
+$offset = $video['thumbnail_custom_time'] === null ? $offset : (int) $video['thumbnail_custom_time'];
 $key = thumbnailKey($path, filemtime($path), $offset);
 if (($video['thumbnail_key'] ?? null) !== $key || (int) ($video['thumbnail_offset'] ?? -1) !== $offset) {
     $query = $db->prepare('UPDATE videos SET thumbnail_key = ?, thumbnail_offset = ? WHERE id = ?');
@@ -42,6 +43,7 @@ $cache = D_THUMBNAILS . '/' . $key . '.jpg';
 $lock = fopen($cache . '.lock', 'c');
 
 if ($lock && flock($lock, LOCK_EX)) {
+    if (($_GET['regenerate'] ?? '') === '1' && is_file($cache) && !unlink($cache)) throw new RuntimeException('The thumbnail could not be replaced.');
     if (!is_file($cache) && function_exists('proc_open')) {
         $temporary = $cache . '.tmp.jpg';
         $pipes = array();

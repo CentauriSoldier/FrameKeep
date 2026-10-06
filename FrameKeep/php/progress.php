@@ -29,10 +29,10 @@ try {
         $db->exec('PRAGMA busy_timeout = 200');
         $db->exec('PRAGMA query_only = ON');
         $offset = (int) $db->query('SELECT thumbnail_time FROM app_settings WHERE id = 1')->fetchColumn();
-        foreach ($db->query("SELECT thumbnail_key, thumbnail_offset FROM videos JOIN libraries ON libraries.id = videos.library_id WHERE videos.missing = 0 AND libraries.enabled = 1 AND libraries.status = 'online'")->fetchAll(PDO::FETCH_ASSOC) as $video) {
+        foreach ($db->query("SELECT thumbnail_key, thumbnail_offset, thumbnail_custom_time FROM videos JOIN libraries ON libraries.id = videos.library_id WHERE videos.missing = 0 AND libraries.enabled = 1 AND libraries.status = 'online'")->fetchAll(PDO::FETCH_ASSOC) as $video) {
             $key = $video['thumbnail_key'];
             if ($key === null) $thumbnails['unchecked']++;
-            elseif ((int) $video['thumbnail_offset'] === $offset && isset($cache[$key])) $thumbnails['ready']++;
+            elseif ((int) $video['thumbnail_offset'] === (int) ($video['thumbnail_custom_time'] ?? $offset) && isset($cache[$key])) $thumbnails['ready']++;
             else $thumbnails['pending']++;
         }
         $thumbnails['counted'] = true;

@@ -40,8 +40,9 @@
                     <label class="form-label" for="thumbnail-size">Thumbnail size</label>
                     <select class="form-select" id="thumbnail-size" data-help="Choose how large library previews appear. Larger previews mean fewer videos per row; video files are unchanged."><option value="small">Small</option><option value="medium">Medium</option><option value="large">Large</option></select>
                     <label class="form-label mt-3" for="thumbnail-time">Thumbnail time (seconds)</label>
-                    <input class="form-control" id="thumbnail-time" type="number" min="0" max="86400" step="1" required data-help="Choose one time position for all previews. New previews use this position as videos are viewed. For shorter clips, the first frame is used if that position produces no image.">
-                    <button class="btn btn-outline-secondary mt-3" id="clear-thumbnails" data-help="Delete generated preview images only. They regenerate as videos are viewed. Videos, tags, playlists, and display names are preserved." type="button">Clear thumbnail cache</button>
+                    <input class="form-control" id="thumbnail-time" type="number" min="0" max="86400" step="1" required data-help="Default time for videos without a custom thumbnail time. Custom choices are preserved. New previews use this position as videos are viewed. For shorter clips, the first frame is used if that position produces no image.">
+                    <button class="btn btn-outline-secondary mt-3" id="clear-thumbnails" data-help="Delete generated preview images only. They regenerate as videos are viewed. Custom thumbnail times, videos, tags, playlists, and display names are preserved." type="button">Clear thumbnail cache</button>
+                    <button class="btn btn-outline-danger mt-3" id="reset-thumbnail-times" type="button" data-help="Remove all custom thumbnail times. Every video will use the global default; previews regenerate as needed.">Reset all thumbnail times</button>
                     <div class="border-top mt-3 pt-3">
                         <p class="small text-body-secondary">Normally, previews are created as you view library cards. Generate all thumbnails now processes all available videos one at a time and reuses cached previews. This can use substantial NAS CPU and disk activity. Keep this page open until it finishes.</p>
                         <button class="btn btn-outline-info" id="generate-thumbnails" type="button" data-help="Create previews for all available library videos, including those on other pages. Uses CPU and disk activity; keep the page open. Cached images are reused.">Generate all thumbnails now</button>
@@ -109,6 +110,15 @@
             <div class="modal-body">
                 <label class="form-label" for="video-name">Display name</label><input class="form-control mb-3" id="video-name" required>
                 <p class="small text-body-secondary text-break" id="video-location"></p>
+                <fieldset class="border rounded p-3 mb-3">
+                    <legend class="fs-6">Thumbnail</legend>
+                    <p class="small text-body-secondary" id="video-thumbnail-current"></p>
+                    <video id="video-thumbnail-preview" class="w-100 bg-black rounded" style="max-height: 220px" preload="metadata" muted playsinline aria-label="Thumbnail frame preview"></video>
+                    <label class="form-label mt-2" for="video-thumbnail-time">Frame time (seconds)</label>
+                    <input class="form-range" id="video-thumbnail-time" type="range" min="0" max="0" step="1" value="0" disabled>
+                    <div class="d-flex align-items-center gap-2"><output id="video-thumbnail-position">0 s</output><button class="btn btn-sm btn-outline-info" id="set-video-thumbnail" type="button" disabled>Set thumbnail</button></div>
+                    <p class="small text-body-secondary mb-0 mt-2" id="video-thumbnail-status">Select a frame, then Set thumbnail. This saves immediately, independently of the other Edit fields.</p>
+                </fieldset>
                 <fieldset class="mb-3"><legend class="fs-6">Tags</legend><div id="video-tags" class="d-flex flex-wrap gap-3"></div></fieldset>
                 <fieldset><legend class="fs-6">Playlists</legend><div id="video-playlists" class="d-flex flex-wrap gap-3"></div></fieldset>
             </div>
