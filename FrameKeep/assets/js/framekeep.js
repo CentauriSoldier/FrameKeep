@@ -19,6 +19,10 @@
         const savedPage = Number(localStorage.getItem('framekeep-page'));
         if (Number.isInteger(savedPage) && savedPage > 0) restoredPage = savedPage;
     } catch (_) {}
+    const downloads = [];
+    let downloading = false;
+    let downloadCount = 0;
+    let downloadFailures = 0;
     let bulkThumbnailsRunning = false;
     let stopBulkThumbnails = false;
     let gridColumns = 0;
@@ -580,6 +584,7 @@
         $('select-results').disabled = !videos.length;
         $('batch-playlist').disabled = !selected.size || !state.playlists.length;
         $('delete-selected').disabled = !selected.size;
+        for (const format of ['video', 'mp3', 'ogg']) $('download-selected-' + format).disabled = !selected.size;
         $('batch-tags').disabled = !selected.size || !state.tags.length;
         $('video-grid').replaceChildren();
         const currentId = currentVideoId();
@@ -649,6 +654,16 @@
             refresh.disabled = libraryOffline(video) || Boolean(Number(video.missing));
             actions.append(refresh);
             actions.append(button('Delete', () => deleteVideos([video.id]), 'btn btn-sm btn-outline-danger'));
+            const downloadActions = make('div', 'd-flex flex-wrap gap-1 border-start ps-2');
+            for (const format of ['video', 'mp3', 'ogg']) {
+                const download = button(format === 'video' ? '' : ' ' + format.toUpperCase(), () => enqueueDownloads([video.id], format));
+                download.prepend(make('i', 'bi bi-download'));
+                download.title = 'Download ' + (format === 'video' ? 'video' : format.toUpperCase() + ' audio');
+                download.setAttribute('aria-label', download.title + ' for ' + video.name);
+                download.disabled = play.disabled;
+                downloadActions.append(download);
+            }
+            actions.append(downloadActions);
             if (playlist) {
                 actions.append(button('Remove', async () => {
                     await mutate('playlist_remove', { playlist: playlist.id, video: video.id });
@@ -897,6 +912,7 @@
         $('edit-playing').disabled = !video;
         $('browse-playing').disabled = !video;
         $('playlist-playing').disabled = !video;
+        for (const format of ['video', 'mp3', 'ogg']) $('download-playing-' + format).disabled = !video || libraryOffline(video) || Boolean(Number(video.missing));
         const refresh = $('refresh-playing');
         refresh.disabled = !video || libraryOffline(video) || Boolean(Number(video.missing));
         const flagged = Boolean(video && attentionReasons(video).length);
@@ -1393,6 +1409,66 @@
     }
 
     $('delete-selected').addEventListener('click', () => deleteVideos([...selected]));
+    for (const format of ['video', 'mp3', 'ogg']) {
+        $('download-selected-' + format).addEventListener('click', () => enqueueDownloads([...selected], format));
+        $('download-playing-' + format).addEventListener('click', () => enqueueDownloads([currentVideoId()], format));
+    }
+
+    function enqueueDownloads(ids, format) {
+        if (!downloading) { downloadCount = 0; downloadFailures = 0; }
+        for (const id of ids) {
+            const video = videoMap.get(id);
+            if (video && !libraryOffline(video) && !Number(video.missing)) downloads.push({ id, name: video.name, format });
+        }
+        processDownloads();
+    }
+
+    async function processDownloads() {
+        if (downloading || !downloads.length) return;
+        downloading = true;
+        const status = $('download-status');
+        status.hidden = false;
+        let links = $('download-links');
+        if (!links) {
+            links = make('div', 'd-flex flex-wrap gap-2 mb-3');
+            links.id = 'download-links';
+            status.after(links);
+        }
+        while (downloads.length) {
+            const job = downloads.shift();
+            status.textContent = 'Preparing ' + job.name + ' (' + job.format.toUpperCase() + ') · ' + downloads.length + ' queued. Keep this page open; your browser may ask to allow multiple downloads.';
+            $('scan-status').textContent = status.textContent;
+            try {
+                const response = await fetch('php/download.php', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: job.id, format: job.format }) });
+                const body = await response.text();
+                let result;
+                try { result = JSON.parse(body); }
+                catch (_) { throw new Error('Download preparation returned HTTP ' + response.status + ' instead of a download response. Check the log; the server may have stopped the conversion.'); }
+                if (!response.ok || result.error) throw new Error(result.error || 'Download preparation failed (HTTP ' + response.status + ').');
+                if (!result.token) throw new Error('The server did not return a download token.');
+                const link = make('a', 'btn btn-sm btn-outline-info', 'Download ' + job.name + ' (' + job.format.toUpperCase() + ')');
+                link.href = 'php/download.php?token=' + encodeURIComponent(result.token);
+                link.download = '';
+                link.title = 'Click if the automatic download did not start.';
+                links.append(link);
+                const downloadFrame = make('iframe');
+                downloadFrame.hidden = true;
+                downloadFrame.title = 'File download';
+                document.body.append(downloadFrame);
+                downloadFrame.src = 'php/download.php?token=' + encodeURIComponent(result.token);
+                downloadCount++;
+                // Native downloads are handed to the browser without buffering large videos in memory.
+                await new Promise((resolve) => setTimeout(resolve, 1500));
+            } catch (error) {
+                downloadFailures++;
+                $('scan-status').textContent = 'Download failed: ' + error.message;
+                showError(error);
+            }
+        }
+        downloading = false;
+        status.textContent = downloadCount + ' downloads sent to your browser' + (downloadFailures ? ' · ' + downloadFailures + ' failed' : '') + '. Browser transfers may continue; allow multiple downloads if prompted. If nothing starts, use the download links above.';
+        $('scan-status').textContent = downloadFailures ? 'Downloads finished with errors. See the library message or Log.' : 'Downloads prepared. If nothing starts, use the download links above the library.';
+    }
     $('batch-tags').addEventListener('click', () => {
         bulkTagVideos = [...selected];
         clearError('bulk-tags-dialog');

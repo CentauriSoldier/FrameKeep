@@ -43,9 +43,11 @@
                 <button class="btn btn-sm btn-outline-secondary" id="batch-tags" type="button" disabled>Tag</button>
                 <button class="btn btn-sm btn-outline-secondary" id="clear-selection" type="button">Clear</button>
                 <button class="btn btn-sm btn-outline-danger" id="delete-selected" type="button" disabled>Delete</button>
+                <div class="d-flex flex-wrap gap-2 border-start ps-2"><button class="btn btn-sm btn-outline-secondary" id="download-selected-video" type="button" title="Download selected videos" disabled><i class="bi bi-download" aria-hidden="true"></i></button><button class="btn btn-sm btn-outline-secondary" id="download-selected-mp3" type="button" title="Download selected MP3 audio" disabled><i class="bi bi-download" aria-hidden="true"></i> MP3</button><button class="btn btn-sm btn-outline-secondary" id="download-selected-ogg" type="button" title="Download selected OGG audio" disabled><i class="bi bi-download" aria-hidden="true"></i> OGG</button></div>
             </div>
         </div>
         </div>
+        <div id="download-status" class="small text-body-secondary mb-2" role="status" hidden></div>
         <p id="library-count" class="small text-body-secondary" role="status"></p>
         <div id="video-grid"></div>
         <nav class="d-grid gap-2 mt-4" aria-label="Library pages">
